@@ -17,6 +17,9 @@ import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableFloatStateOf
@@ -62,6 +65,7 @@ import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
+import com.fardeenkhan.moodtune.feature.playlist.ui.components.rememberDragDropListState
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
 import com.google.accompanist.permissions.rememberPermissionState
@@ -366,56 +370,20 @@ fun MoodDetailScreen(
 ) {
     val songs = state.currentPlaylist?.songs ?: emptyList()
     val lazyListState = rememberLazyListState()
-    val coroutineScope = rememberCoroutineScope()
     
-    // Use updated state to keep the target stable while still having access to latest data
-    val currentSongs by rememberUpdatedState(songs)
-    val currentDraggedId by rememberUpdatedState(state.draggedSongId)
-    val currentOnIntent by rememberUpdatedState(onIntent)
-
-    val listDndTarget = remember {
-        object : DragAndDropTarget {
-            override fun onMoved(event: DragAndDropEvent) {
-                val draggedId = currentDraggedId ?: return
-                val dragEvent = event.toAndroidDragEvent()
-                val y = dragEvent.y
-                val layoutInfo = lazyListState.layoutInfo
-                
-                // 1. Handle Auto-scrolling
-                val viewHeight = layoutInfo.viewportSize.height
-                val scrollThreshold = viewHeight * 0.15f
-                if (y < scrollThreshold) {
-                    coroutineScope.launch { lazyListState.animateScrollBy(-50f) }
-                } else if (y > viewHeight - scrollThreshold) {
-                    coroutineScope.launch { lazyListState.animateScrollBy(50f) }
-                }
-
-                // 2. Find the item under the y coordinate
-                val item = layoutInfo.visibleItemsInfo.find { visibleItem ->
-                    y.toInt() in visibleItem.offset..(visibleItem.offset + visibleItem.size)
-                }
-
-                if (item != null) {
-                    val headerCount = 2 // Header and Actions
-                    val targetIndex = (item.index - headerCount).coerceIn(0, currentSongs.size - 1)
-                    val fromIndex = currentSongs.indexOfFirst { it.id == draggedId }
-
-                    if (fromIndex != -1 && fromIndex != targetIndex) {
-                        currentOnIntent(PlaylistIntent.ReorderSongs(fromIndex, targetIndex))
-                    }
-                }
-            }
-
-            override fun onDrop(event: DragAndDropEvent): Boolean {
-                currentOnIntent(PlaylistIntent.EndDrag)
-                return true
-            }
-
-            override fun onEnded(event: DragAndDropEvent) {
-                currentOnIntent(PlaylistIntent.EndDrag)
-            }
+    val currentOnMove by rememberUpdatedState<(Int, Int) -> Unit> { from, to ->
+        // Subtract 2 because of the header and actions items
+        val headerCount = 2
+        val actualFrom = (from - headerCount).coerceAtLeast(0)
+        val actualTo = (to - headerCount).coerceAtLeast(0)
+        
+        if (actualFrom < songs.size && actualTo < songs.size) {
+            onIntent(PlaylistIntent.ReorderSongs(actualFrom, actualTo))
         }
     }
+
+    val dragdropState = rememberDragDropListState(lazyListState,
+        onMove = { from, to -> currentOnMove(from, to) })
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
@@ -436,11 +404,17 @@ fun MoodDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
-                .dragAndDropTarget(
-                    shouldStartDragAndDrop = { event ->
-                        event.mimeTypes().contains(ClipDescription.MIMETYPE_TEXT_PLAIN)
-                    },
-                    target = listDndTarget
+                .then(
+                    if (state.isReorderMode) {
+                        Modifier.pointerInput(Unit) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { offset -> dragdropState.onDragStart(offset) },
+                                onDragEnd = { dragdropState.onDragEnd() },
+                                onDragCancel = { dragdropState.onDragEnd() },
+                                onDrag = { _, dragAmount -> dragdropState.onDrag(dragAmount) }
+                            )
+                        }
+                    } else Modifier
                 )
         ) {
             item {
@@ -448,8 +422,9 @@ fun MoodDetailScreen(
                     mood = mood, 
                     songCount = songs.size, 
                     isReorderMode = state.isReorderMode,
+                    isSaving = state.isSaving,
                     onBack = onBack,
-                    onReorderClick = { onIntent(PlaylistIntent.ToggleReorderMode) }
+                    onReorderClick = { if (!state.isSaving) onIntent(PlaylistIntent.ToggleReorderMode) }
                 )
             }
             item {
@@ -458,13 +433,13 @@ fun MoodDetailScreen(
                     onNavigateToNowPlaying()
                 })
             }
-            if (state.isLoadingCurrentPlaylist) {
+            if (state.isLoadingCurrentPlaylist && songs.isEmpty()) {
                 item {
                     Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                         LoadingIndicator()
                     }
                 }
-            } else if (songs.isEmpty()) {
+            } else if (songs.isEmpty() && !state.isLoadingCurrentPlaylist) {
                 item {
                     Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                         Text(text = "No songs in this playlist", color = Color.Gray)
@@ -472,25 +447,38 @@ fun MoodDetailScreen(
                 }
             } else {
                 itemsIndexed(songs, key = { _, song -> song.id }) { index, song ->
+                    val isDragging = dragdropState.draggedItemId == song.id
+
+                    val animatedOffset by animateFloatAsState(
+                        targetValue = if (isDragging) dragdropState.getDraggedOffset() else 0f,
+                        animationSpec = spring(
+                            stiffness = Spring.StiffnessMediumLow,
+                            dampingRatio = Spring.DampingRatioLowBouncy
+                        ),
+                        label = "dragOffset"
+                    )
+
                     SongListItem(
                         song = song,
                         isReorderMode = state.isReorderMode,
-                        modifier = Modifier.animateItem(),
+                        modifier = Modifier
+                            .animateItem()
+                            .graphicsLayer {
+                                translationY = animatedOffset
+                                shadowElevation = if (isDragging) 8f else 0f
+                                scaleX = if (isDragging) 1.05f else 1f
+                                scaleY = if (isDragging) 1.05f else 1f
+                            }
+                            .background(
+                                if (isDragging) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
+                                else Color.Transparent
+                            ),
                         onClick = { 
                             if (!state.isReorderMode) {
                                 onIntent(PlaylistIntent.PlayPlaylist(index))
                                 onNavigateToNowPlaying()
                             }
-                        },
-                        dragModifier = if (state.isReorderMode) {
-                            Modifier.dragAndDropSource { _ ->
-                                onIntent(PlaylistIntent.StartDrag(song.id))
-                                DragAndDropTransferData(
-                                    clipData = ClipData.newPlainText("songId", song.id),
-                                    flags = View.DRAG_FLAG_GLOBAL
-                                )
-                            }
-                        } else Modifier
+                        }
                     )
                 }
             }
@@ -664,6 +652,7 @@ fun PlaylistHeader(
     mood: String, 
     songCount: Int, 
     isReorderMode: Boolean,
+    isSaving: Boolean,
     onBack: () -> Unit,
     onReorderClick: () -> Unit
 ) {
@@ -718,12 +707,21 @@ fun PlaylistHeader(
             IconButton(onClick = onBack) {
                 Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
             }
-            IconButton(onClick = onReorderClick) {
-                Icon(
-                    if (isReorderMode) Icons.Default.Check else Icons.Default.Reorder, 
-                    contentDescription = if (isReorderMode) "Done" else "Reorder", 
-                    tint = if (isReorderMode) MaterialTheme.colorScheme.primary else Color.White
+            
+            if (isSaving) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(12.dp).size(24.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                IconButton(onClick = onReorderClick) {
+                    Icon(
+                        if (isReorderMode) Icons.Default.Check else Icons.Default.Reorder, 
+                        contentDescription = if (isReorderMode) "Done" else "Reorder", 
+                        tint = if (isReorderMode) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
             }
         }
     }
@@ -759,8 +757,7 @@ fun SongListItem(
     song: Song,
     isReorderMode: Boolean,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    dragModifier: Modifier = Modifier
+    modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val isExternal = song.externalUrl?.startsWith("http") == true
@@ -777,7 +774,7 @@ fun SongListItem(
                 Icons.Default.Reorder,
                 contentDescription = "Drag to reorder",
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = dragModifier.padding(end = 12.dp)
+                modifier = Modifier.padding(end = 12.dp)
             )
         }
 

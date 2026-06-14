@@ -190,18 +190,36 @@ class MediaPlaybackService : MediaSessionService() {
         val progress: Float
     )
 
+    private fun clearWidget() {
+        serviceScope.launch {
+            try {
+                val widgetClass = Class.forName("com.fardeenkhan.moodtune.app.widget.MoodTuneWidget") as Class<out GlanceAppWidget>
+                MoodTuneWidgetHelper.updateWidgetState(
+                    context = this@MediaPlaybackService,
+                    widgetClass = widgetClass,
+                    trackTitle = "",
+                    artistName = "",
+                    isPlaying = false,
+                    albumArtPath = "",
+                    currentProgress = 0f
+                )
+            } catch (e: Exception) {
+                android.util.Log.e("MediaPlaybackService", "Error clearing widget", e)
+            }
+        }
+    }
+
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? {
         return mediaSession
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val player = mediaSession?.player
-        if (player == null || !player.playWhenReady || player.mediaItemCount == 0) {
-            stopSelf()
-        }
+        clearWidget()
+        stopSelf()
     }
 
     override fun onDestroy() {
+        clearWidget()
         mediaSession?.run {
             player.removeListener(playerListener)
             player.release()

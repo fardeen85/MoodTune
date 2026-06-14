@@ -81,7 +81,19 @@ class PlaylistViewModel(
                 reorderSongs(intent.fromIndex, intent.toIndex)
             }
             is PlaylistIntent.ToggleReorderMode -> {
-                _state.update { it.copy(isReorderMode = !it.isReorderMode) }
+                val isCurrentlyReordering = _state.value.isReorderMode
+                if (isCurrentlyReordering) {
+                    // We are turning OFF reorder mode, save the final state to DB
+                    _state.update { it.copy(isSaving = true) }
+                    _state.value.currentPlaylist?.let { playlist ->
+                        viewModelScope.launch {
+                            playlistRepository.savePlaylist(playlist)
+                            _state.update { it.copy(isSaving = false, isReorderMode = false) }
+                        }
+                    }
+                } else {
+                    _state.update { it.copy(isReorderMode = true) }
+                }
             }
             is PlaylistIntent.StartDrag -> {
                 _state.update { it.copy(draggedSongId = intent.songId) }
@@ -97,8 +109,6 @@ class PlaylistViewModel(
         }
     }
 
-    private var savePlaylistJob: Job? = null
-
     private fun reorderSongs(fromIndex: Int, toIndex: Int) {
         val currentPlaylist = _state.value.currentPlaylist ?: return
         val songs = currentPlaylist.songs.toMutableList()
@@ -109,12 +119,6 @@ class PlaylistViewModel(
 
         val updatedPlaylist = currentPlaylist.copy(songs = songs)
         _state.update { it.copy(currentPlaylist = updatedPlaylist) }
-
-        savePlaylistJob?.cancel()
-        savePlaylistJob = viewModelScope.launch {
-            kotlinx.coroutines.delay(500) // Debounce save
-            playlistRepository.savePlaylist(updatedPlaylist)
-        }
     }
 
     private fun observeCurrentPlaylist() {
@@ -129,10 +133,15 @@ class PlaylistViewModel(
                 }
             }
             .onEach { playlist ->
-                _state.update { it.copy(
-                    currentPlaylist = playlist,
-                    isLoadingCurrentPlaylist = false
-                ) }
+                // Only update from DB if we aren't in the middle of reordering or saving
+                if (!_state.value.isReorderMode && !_state.value.isSaving) {
+                    _state.update { it.copy(
+                        currentPlaylist = playlist,
+                        isLoadingCurrentPlaylist = false
+                    ) }
+                } else {
+                    _state.update { it.copy(isLoadingCurrentPlaylist = false) }
+                }
             }
             .launchIn(viewModelScope)
     }
@@ -209,6 +218,7 @@ data class PlaylistState(
     val currentMood: String? = null,
     val currentPlaylist: Playlist? = null,
     val isReorderMode: Boolean = false,
+    val isSaving: Boolean = false,
     val draggedSongId: String? = null,
     val isLoadingPlaylists: Boolean = false,
     val isLoadingCurrentPlaylist: Boolean = false,
