@@ -1,13 +1,19 @@
 package com.fardeenkhan.moodtune.infrastructure.datasource
 
-import android.content.ContentResolver
 import android.content.ContentUris
+import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
+import java.io.File
+import java.security.MessageDigest
 
-class LocalSongDataSource(private val contentResolver: ContentResolver) {
+class LocalSongDataSource(private val context: Context) {
+
+    private val artDir = File(context.filesDir, "album_art").also { it.mkdirs() }
 
     fun fetchDeviceSongs(): List<Song> {
         val songList = mutableListOf<Song>()
@@ -20,7 +26,9 @@ class LocalSongDataSource(private val contentResolver: ContentResolver) {
             MediaStore.Audio.Media.ALBUM_ID
         )
 
-        val cursor = contentResolver.query(uri, projection, null, null, null)
+        val cursor = context.contentResolver.query(uri, projection, null, null, null)
+
+        val activeHashes = mutableSetOf<String>()
 
         cursor?.use {
             val idColumn = it.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
@@ -36,10 +44,12 @@ class LocalSongDataSource(private val contentResolver: ContentResolver) {
                 val path = it.getString(dataColumn)
                 val albumId = it.getLong(albumIdColumn)
 
-                val albumArtUri = ContentUris.withAppendedId(
-                    Uri.parse("content://media/external/audio/albumart"),
+                val albumArtUri: Uri = ContentUris.withAppendedId(
+                    MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
                     albumId
-                ).toString()
+                )
+
+                val localArtPath = saveEmbeddedArt(path, activeHashes)
 
                 songList.add(
                     Song(
@@ -47,15 +57,61 @@ class LocalSongDataSource(private val contentResolver: ContentResolver) {
                         title = title,
                         artist = artist,
                         reason = "Device File",
-                        imageUrl = albumArtUri,
+                        imageUrl = albumArtUri.toString(),
                         externalUrl = path,
                         mood = null,
                         energy = null,
-                        explanation = SongExplanation(id, "Local file from device", "Unknown", "Local")
+                        explanation = SongExplanation(id, "Local file from device", "Unknown", "Local"),
+                        localAlbumArtPath = localArtPath
                     )
                 )
             }
         }
+
+        deleteOrphanedArt(activeHashes)
+
         return songList
+    }
+
+    // Returns the saved file path, or null if no embedded art exists
+    private fun saveEmbeddedArt(filePath: String?, activeHashes: MutableSet<String>): String? {
+        if (filePath == null) return null
+
+        val hash = md5(filePath)
+        activeHashes.add(hash)
+
+        val artFile = File(artDir, "$hash.jpg")
+        if (artFile.exists()) return artFile.absolutePath
+
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(filePath)
+            val bytes = retriever.embeddedPicture ?: return null
+            artFile.outputStream().use { out ->
+                // Decode and re-encode at 90% quality to normalise format
+                val bitmap = android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                bitmap?.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                    ?: out.write(bytes) // fallback: write raw bytes if decode fails
+            }
+            artFile.absolutePath
+        } catch (e: Exception) {
+            artFile.delete()
+            null
+        } finally {
+            retriever.release()
+        }
+    }
+
+    private fun deleteOrphanedArt(activeHashes: Set<String>) {
+        artDir.listFiles()?.forEach { file ->
+            if (file.nameWithoutExtension !in activeHashes) {
+                file.delete()
+            }
+        }
+    }
+
+    private fun md5(input: String): String {
+        val bytes = MessageDigest.getInstance("MD5").digest(input.toByteArray())
+        return bytes.joinToString("") { "%02x".format(it) }
     }
 }

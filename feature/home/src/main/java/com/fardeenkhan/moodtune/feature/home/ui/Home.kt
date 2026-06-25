@@ -1,16 +1,22 @@
 @file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
 package com.fardeenkhan.moodtune.feature.home.ui
 
-
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -21,36 +27,59 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.util.lerp
+import coil3.compose.AsyncImage
+import com.fardeenkhan.moodtune.core.ui.components.NowPlayingIndicator
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel2
+import com.fardeenkhan.moodtune.core.ui.theme.getMoodColor
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.absoluteValue
+import kotlin.math.cos
+import kotlin.math.sin
 import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
+import kotlin.collections.isNotEmpty
 
 @Composable
-fun HomeScreenRoot(onNavigateToPlaylist: (String) -> Unit) {
+fun HomeScreenRoot(
+    onNavigateToPlaylist: (String) -> Unit,
+    isPlaying: Boolean = false,
+    onNowPlayingClick: () -> Unit = {}
+) {
     val viewModel: HomeViewModel = koinViewModel()
-    HomeScreen(viewModel, onNavigateToPlaylist)
+    HomeScreen(viewModel, onNavigateToPlaylist, isPlaying, onNowPlayingClick)
 }
 
 @Composable
-fun HomeScreen(viewModel: HomeViewModel, onNavigateToPlaylist: (String) -> Unit) {
+fun HomeScreen(
+    viewModel: HomeViewModel,
+    onNavigateToPlaylist: (String) -> Unit,
+    isPlaying: Boolean = false,
+    onNowPlayingClick: () -> Unit = {}
+) {
     val state by viewModel.state.collectAsState()
 
     HomeScreen(
         state = state,
         onIntent = viewModel::onIntent,
-        onNavigateToPlaylist = onNavigateToPlaylist
+        onNavigateToPlaylist = onNavigateToPlaylist,
+        isPlaying = isPlaying,
+        onNowPlayingClick = onNowPlayingClick
     )
 }
 
@@ -58,9 +87,52 @@ fun HomeScreen(viewModel: HomeViewModel, onNavigateToPlaylist: (String) -> Unit)
 fun HomeScreen(
     state: HomeState,
     onIntent: (HomeIntent) -> Unit,
-    onNavigateToPlaylist: (String) -> Unit
+    onNavigateToPlaylist: (String) -> Unit,
+    isPlaying: Boolean = false,
+    onNowPlayingClick: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    var showVibeGenerator by remember { mutableStateOf(false) }
+
+    // Vibe Generator Dialog (retrains generation feature in search icon)
+    if (showVibeGenerator) {
+        AlertDialog(
+            onDismissRequest = { showVibeGenerator = false },
+            title = { Text("Generate a Vibe Playlist") },
+            text = {
+                Column {
+                    Text("Describe how you are feeling to let AI curate the perfect music list.", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    OutlinedTextField(
+                        value = state.vibeInput,
+                        onValueChange = { onIntent(HomeIntent.OnVibeInputChange(it)) },
+                        placeholder = { Text("e.g. Night driving, chill beats") },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showVibeGenerator = false
+                        onIntent(HomeIntent.RequestPlaylistGeneration())
+                    },
+                    enabled = state.vibeInput.isNotBlank()
+                ) {
+                    Icon(Icons.Default.AutoAwesome, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Generate")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showVibeGenerator = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 
     if (state.showConfirmationDialog) {
         AlertDialog(
@@ -71,13 +143,7 @@ fun HomeScreen(
                     Text("How would you like to create a playlist for \"${state.pendingMood}\"?")
                     Spacer(modifier = Modifier.height(16.dp))
                     Text(
-                        text = "AI Generation: We'll find the perfect songs for your mood (Requires Internet).",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Empty Playlist: Create a fresh list and add your own songs (Works Offline).",
+                        text = "AI Generation: We'll find the perfect songs for your mood.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -133,8 +199,18 @@ fun HomeScreen(
                 }
             }
             is HomeGenerationStatus.Error -> {
-                scope.launch { snackbarHostState.showSnackbar(status.message) }
-                onIntent(HomeIntent.ResetState)
+                scope.launch {
+                    val result = snackbarHostState.showSnackbar(
+                        message = status.message,
+                        actionLabel = "Retry",
+                        duration = SnackbarDuration.Long
+                    )
+                    if (result == SnackbarResult.ActionPerformed) {
+                        onIntent(HomeIntent.RetryGeneration)
+                    } else {
+                        onIntent(HomeIntent.ResetState)
+                    }
+                }
             }
             else -> {}
         }
@@ -142,7 +218,13 @@ fun HomeScreen(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
-        topBar = { HomeTopBar() },
+        topBar = {
+            HomeTopBar(
+                onSearchClick = { showVibeGenerator = true },
+                isPlaying = isPlaying,
+                onNowPlayingClick = onNowPlayingClick
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize()) {
@@ -150,28 +232,71 @@ fun HomeScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
-                contentPadding = PaddingValues(bottom = 32.dp),
-                verticalArrangement = Arrangement.spacedBy(40.dp)
+                contentPadding = PaddingValues(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
+                // 1. Featured Carousel section (representing most played playlists)
                 item {
-                    VibeGenerationSection(
-                        vibeInput = state.vibeInput,
-                        onVibeInputChange = { onIntent(HomeIntent.OnVibeInputChange(it)) },
-                        onGenerateClick = { onIntent(HomeIntent.RequestPlaylistGeneration()) },
-                        isLoading = state.generationStatus is HomeGenerationStatus.Loading
+                    val carouselPlaylists = if (state.mostPlayedPlaylists.isNotEmpty()) {
+                        state.mostPlayedPlaylists
+                    } else if (state.recentlyPlayedPlaylists.isNotEmpty()) {
+                        state.recentlyPlayedPlaylists
+                    } else {
+                        // Fallback dummy playlists so it is never empty and looks good immediately
+                        listOf(
+                            Playlist("dummy_1", "Reggae & Chill", listOf(Song("1", "Is This The Right Way?", "Beres Hammond", "", null, null, null, null, SongExplanation("", "", "", ""))), 0),
+                            Playlist("dummy_2", "Slow Motion", listOf(Song("2", "Slow Motion", "Wackies", "", null, null, null, null, SongExplanation("", "", "", ""))), 0),
+                            Playlist("dummy_3", "Gym Time Again", listOf(Song("3", "Pump It Up", "Gym Vibe", "", null, null, null, null, SongExplanation("", "", "", ""))), 0)
+                        )
+                    }
+
+                    FeaturedCarousel(
+                        playlists = carouselPlaylists,
+                        onPlaylistClick = { playlist ->
+                            if (!playlist.id.startsWith("dummy_")) {
+                                onIntent(HomeIntent.MarkPlaylistAsPlayed(playlist.id))
+                                onNavigateToPlaylist(playlist.mood)
+                            } else {
+                                // Trigger empty/mock generation for first play
+                                onIntent(HomeIntent.RequestPlaylistGeneration(playlist.mood))
+                            }
+                        }
                     )
                 }
+
+                // 2. Playlists for You section
                 item {
-                    QuickMoodsSection(
-                        onMoodClick = { onIntent(HomeIntent.RequestPlaylistGeneration(it)) },
-                        isLoading = state.generationStatus is HomeGenerationStatus.Loading
+                    PlaylistsForYouSection(
+                        playlists = state.allPlaylists.ifEmpty {
+                            listOf(
+                                Playlist("dummy_1", "Reggae and Chill", emptyList(), 0),
+                                Playlist("dummy_2", "Slow Motion", emptyList(), 0),
+                                Playlist("dummy_3", "Gym Time Again", emptyList(), 0),
+                                Playlist("dummy_4", "Party Dance", emptyList(), 0)
+                            )
+                        },
+                        onPlaylistClick = { playlist ->
+                            if (!playlist.id.startsWith("dummy_")) {
+                                onIntent(HomeIntent.MarkPlaylistAsPlayed(playlist.id))
+                                onNavigateToPlaylist(playlist.mood)
+                            } else {
+                                onIntent(HomeIntent.RequestPlaylistGeneration(playlist.mood))
+                            }
+                        }
                     )
                 }
+
+                // 3. In the Mix section
                 item {
-                    RecentlyPlayedSection(
-                        playlists = state.recentlyPlayedPlaylists,
-                        isLoading = state.isLoadingRecentlyPlayed,
-                        onPlaylistClick = { onIntent(HomeIntent.MarkPlaylistAsPlayed(it.id)) }
+                    InTheMixSection(
+                        songs = state.mostPlayedSongs.ifEmpty {
+                            listOf(
+                                Song("mix_1", "Wack We A Wack", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", "")),
+                                Song("mix_2", "Major Lazer", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", "")),
+                                Song("mix_3", "Doh Wanna Go Bad", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", ""))
+                            )
+                        },
+                        onSongClick = { /* Can play via MusicPlayerManager or navigate to details */ }
                     )
                 }
             }
@@ -190,15 +315,19 @@ fun HomeScreen(
     }
 }
 
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeTopBar() {
-    CenterAlignedTopAppBar(
+fun HomeTopBar(
+    onSearchClick: () -> Unit,
+    isPlaying: Boolean = false,
+    onNowPlayingClick: () -> Unit = {}
+) {
+    TopAppBar(
         title = {
             Text(
-                text = "MoodTune AI",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                text = "Featured",
+                style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                color = Color.White
             )
         },
         navigationIcon = {
@@ -207,250 +336,176 @@ fun HomeTopBar() {
                     .padding(start = 16.dp)
                     .size(36.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     Icons.Default.Person,
-                    contentDescription = "Profile",
+                    contentDescription = "User profile",
                     modifier = Modifier.size(20.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    tint = Color.White
                 )
             }
         },
         actions = {
-            IconButton(onClick = { /* TODO */ }) {
+            NowPlayingIndicator(
+                isPlaying = isPlaying,
+                onClick = onNowPlayingClick
+            )
+            IconButton(
+                onClick = onSearchClick,
+                modifier = Modifier.padding(end = 8.dp)
+            ) {
                 Icon(
                     Icons.Default.Search,
-                    contentDescription = "Search",
-                    tint = MaterialTheme.colorScheme.onSurface
+                    contentDescription = "Search & Vibe",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
                 )
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(
             containerColor = Color.Transparent,
-            titleContentColor = MaterialTheme.colorScheme.onBackground
+            titleContentColor = Color.White
         ),
         modifier = Modifier.statusBarsPadding()
     )
 }
 
 @Composable
-fun VibeGenerationSection(
-    vibeInput: String,
-    onVibeInputChange: (String) -> Unit,
-    onGenerateClick: () -> Unit,
-    isLoading: Boolean
-) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Text(
-            text = "How are you\nfeeling?",
-            style = MaterialTheme.typography.displayMedium.copy(
-                fontWeight = FontWeight.ExtraBold,
-                lineHeight = 44.sp
-            ),
-            color = MaterialTheme.colorScheme.onBackground,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.padding(vertical = 32.dp)
-        )
-        
-        OutlinedTextField(
-            value = vibeInput,
-            onValueChange = onVibeInputChange,
-            placeholder = { 
-                Text(
-                    "e.g. Late night coding, feeling calm",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
-                ) 
-            },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.2f),
-                focusedIndicatorColor = MaterialTheme.colorScheme.primary,
-                unfocusedIndicatorColor = Color.Transparent,
-                focusedTextColor = MaterialTheme.colorScheme.onSurface,
-                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
-            ),
-            singleLine = true,
-            enabled = !isLoading
-        )
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        Button(
-            onClick = onGenerateClick,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .height(64.dp),
-            shape = RoundedCornerShape(20.dp),
-            colors = ButtonDefaults.buttonColors(
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary
-            ),
-            enabled = !isLoading && vibeInput.isNotBlank(),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 4.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Icon(
-                    Icons.Default.AutoAwesome, 
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    "Generate Mood",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun QuickMoodsSection(
-    onMoodClick: (String) -> Unit,
-    isLoading: Boolean
-) {
-    Column(modifier = Modifier.padding(horizontal = 16.dp)) {
-        Text(
-            text = "Quick Moods",
-            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onBackground,
-            modifier = Modifier.padding(bottom = 16.dp)
-        )
-        
-        val moods = listOf(
-            QuickMoodItem("Energetic", Icons.Default.Bolt, MaterialTheme.colorScheme.primary),
-            QuickMoodItem("Melancholic", Icons.Default.WaterDrop, MaterialTheme.colorScheme.secondary),
-            QuickMoodItem("Focused", Icons.Default.FilterCenterFocus, MaterialTheme.colorScheme.tertiary),
-            QuickMoodItem("Calm", Icons.Default.Spa, MaterialTheme.colorScheme.primaryContainer)
-        )
-        
-        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MoodGridItem(moods[0], Modifier.weight(1f), onMoodClick, isLoading)
-                MoodGridItem(moods[1], Modifier.weight(1f), onMoodClick, isLoading)
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                MoodGridItem(moods[2], Modifier.weight(1f), onMoodClick, isLoading)
-                MoodGridItem(moods[3], Modifier.weight(1f), onMoodClick, isLoading)
-            }
-        }
-    }
-}
-
-data class QuickMoodItem(val title: String, val icon: ImageVector, val color: Color)
-
-@Composable
-fun MoodGridItem(
-    item: QuickMoodItem, 
-    modifier: Modifier = Modifier,
-    onMoodClick: (String) -> Unit,
-    isLoading: Boolean
-) {
-    ElevatedCard(
-        modifier = modifier
-            .height(110.dp)
-            .clickable(enabled = !isLoading) { onMoodClick(item.title) },
-        shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.elevatedCardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-        ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.SpaceBetween
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(item.color.copy(alpha = 0.2f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    item.icon, 
-                    contentDescription = null, 
-                    tint = item.color, 
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-            Text(
-                text = item.title,
-                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onSurface
-            )
-        }
-    }
-}
-
-@Composable
-fun RecentlyPlayedSection(
+fun FeaturedCarousel(
     playlists: List<Playlist>,
-    isLoading: Boolean,
     onPlaylistClick: (Playlist) -> Unit
 ) {
-    if (!isLoading && playlists.isEmpty()) return
+    val pagerState = rememberPagerState(pageCount = { playlists.size })
 
-    Column {
-        Row(
+
+    HorizontalPager(
+        state = pagerState,
+        contentPadding = PaddingValues(start = 24.dp, end = 64.dp),
+        pageSpacing = 12.dp,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(220.dp)
+    ) { page ->
+        val playlist = playlists[page]
+        val moodColor = getMoodColor(playlist.mood)
+        val song = playlist.songs.firstOrNull()
+
+        Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .fillMaxSize()
+                .graphicsLayer {
+                    val pageOffset = (
+                        (pagerState.currentPage - page) + pagerState.currentPageOffsetFraction
+                    ).absoluteValue
+                    alpha = lerp(start = 0.5f, stop = 1f, fraction = 1f - pageOffset.coerceIn(0f, 1f))
+                    scaleY = lerp(start = 0.85f, stop = 1f, fraction = 1f - pageOffset.coerceIn(0f, 1f))
+                }
         ) {
-            Text(
-                text = "Recently Played",
-                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            if (!isLoading && playlists.size > 3) {
-                Text(
-                    text = "See all",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        if (isLoading) {
-            Box(
+            val cardArtModel = song?.localAlbumArtPath?.let { java.io.File(it) } ?: song?.imageUrl
+            Card(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .height(180.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxSize()
+                    .padding(top = 20.dp)
+                    .clickable { onPlaylistClick(playlist) },
+                shape = RoundedCornerShape(24.dp),
+                colors = CardDefaults.cardColors(containerColor = moodColor)
             ) {
-                LoadingIndicator()
-            }
-        } else {
-            androidx.compose.foundation.lazy.LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                items(playlists) { playlist ->
-                    RecentlyPlayedCard(
-                        playlist = playlist,
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // Album art background
+                    if (cardArtModel != null) {
+                        AsyncImage(
+                            model = cardArtModel,
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                    }
+                    // Dim overlay for text readability
+                    Box(
                         modifier = Modifier
-                            .width(160.dp)
-                            .clickable { onPlaylistClick(playlist) }
+                            .fillMaxSize()
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.10f),
+                                        Color.Black.copy(alpha = 0.52f)
+                                    )
+                                )
+                            )
+                    )
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(24.dp)
+                            .padding(end = 80.dp),
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = song?.artist ?: "Curated Playlist",
+                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White.copy(alpha = 0.9f)
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = song?.title ?: playlist.mood,
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = Color.White,
+                            maxLines = 2
+                        )
+                    }
+
+                    // Cookie-shaped play button
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 14.dp, end = 14.dp)
+                            .size(52.dp)
+                            .clip(MaterialShapes.Cookie7Sided.toShape())
+                            .background(Color(0xFFF5C518))
+                            .clickable { onPlaylistClick(playlist) },
+                        contentAlignment = Alignment.Center
+                    ) {
+
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "Play",
+                            tint = Color(0xFF5D3A1A),
+                            modifier = Modifier.size(26.dp)
+                        )
+                    }
+                }
+            }
+
+            // Floating album art at top-right, partially overflows above card
+            if (cardArtModel != null) {
+                AsyncImage(
+                    model = cardArtModel,
+                    contentDescription = "${song?.title} album art",
+                    modifier = Modifier
+                        .size(100.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(end = 16.dp)
+                        .clip(RoundedCornerShape(16.dp)),
+                    contentScale = ContentScale.Crop
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(90.dp)
+                        .align(Alignment.TopEnd)
+                        .padding(end = 16.dp)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(moodColor.copy(alpha = 0.8f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        Icons.Default.MusicNote,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(36.dp)
                     )
                 }
             }
@@ -459,62 +514,178 @@ fun RecentlyPlayedSection(
 }
 
 @Composable
-fun RecentlyPlayedCard(playlist: Playlist, modifier: Modifier = Modifier) {
-    val color = getMoodColor(playlist.mood)
-    Column(modifier = modifier) {
-        Box(
-            modifier = Modifier
-                .aspectRatio(1f)
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(24.dp))
-                .background(color.copy(alpha = 0.1f)),
-            contentAlignment = Alignment.Center
+fun PlaylistsForYouSection(
+    playlists: List<Playlist>,
+    onPlaylistClick: (Playlist) -> Unit
+) {
+    Column {
+        Text(
+            text = "Playlists for You",
+            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+            color = Color.White,
+            modifier = Modifier.padding(top = 24.dp,start = 24.dp,end=24.dp, bottom = 16.dp)
+        )
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-             Box(
-                modifier = Modifier
-                    .size(80.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(color)
-            ) {
-                Icon(
-                    Icons.Default.MusicNote,
-                    contentDescription = null,
-                    modifier = Modifier.align(Alignment.Center).size(40.dp),
-                    tint = Color.White.copy(alpha = 0.8f)
+            items(playlists) { playlist ->
+                val gradient = Brush.linearGradient(
+                    colors = listOf(
+                        getMoodColor(playlist.mood),
+                        getMoodColor(playlist.mood).copy(alpha = 0.5f)
+                    )
                 )
+
+                Column(
+                    modifier = Modifier
+                        .width(120.dp)
+                        .clickable { onPlaylistClick(playlist) }
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(gradient)
+                    ) {
+                        // Diagonal stripe decoration
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .width(20.dp)
+                                .offset(x = 30.dp)
+                                .graphicsLayer { rotationZ = -35f }
+                                .background(Color.White.copy(alpha = 0.07f))
+                        )
+
+                        // Overlapping avatars
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(12.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.DarkGray)
+                                    .border(1.5.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .padding(start = 20.dp)
+                                    .size(32.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Gray)
+                                    .border(1.5.dp, Color.White, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = playlist.mood,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        maxLines = 2
+                    )
+                }
             }
         }
-        Spacer(modifier = Modifier.height(12.dp))
-        Text(
-            text = playlist.mood,
-            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1
-        )
-        Text(
-            text = "${playlist.songs.size} tracks • AI Generated",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1
-        )
     }
 }
 
-fun getMoodColor(mood: String): Color {
-    val palette = listOf(
-        Color(0xFFFF5722), // Deep Orange
-        Color(0xFF4CAF50), // Green
-        Color(0xFF2196F3), // Blue
-        Color(0xFF9C27B0), // Purple
-        Color(0xFFE91E63), // Pink
-        Color(0xFFFFEB3B), // Yellow
-        Color(0xFF00BCD4), // Cyan
-        Color(0xFF673AB7), // Deep Purple
-        Color(0xFF009688), // Teal
-        Color(0xFFFF9800)  // Orange
-    )
-    val index = Math.abs(mood.lowercase().hashCode()) % palette.size
-    return palette[index]
+@Composable
+fun InTheMixSection(
+    songs: List<Song>,
+    onSongClick: (Song) -> Unit
+) {
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 24.dp, start = 24.dp, end = 24.dp, bottom = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "In the Mix",
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+            
+            Text(
+                text = "See All",
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color(0xFFFF5722), // Orange/red See All link
+                modifier = Modifier.clickable { /* Handle See All */ }
+            )
+        }
+
+        LazyRow(
+            contentPadding = PaddingValues(horizontal = 24.dp),
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(songs) { song ->
+                Column(
+                    modifier = Modifier
+                        .width(130.dp)
+                        .clickable { onSongClick(song) }
+                ) {
+                    val mixArtModel = song.localAlbumArtPath?.let { java.io.File(it) } ?: song.imageUrl
+                    if (mixArtModel != null) {
+                        AsyncImage(
+                            model = mixArtModel,
+                            contentDescription = "${song.title} by ${song.artist}",
+                            modifier = Modifier
+                                .size(130.dp)
+                                .clip(RoundedCornerShape(16.dp)),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(130.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(SurfaceLevel1),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.MusicNote,
+                                contentDescription = null,
+                                tint = Color.Gray,
+                                modifier = Modifier.size(36.dp)
+                            )
+                        }
+                    }
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = song.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        maxLines = 1
+                    )
+                    
+                    Text(
+                        text = song.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
 }
 
 val mockSongs = listOf(

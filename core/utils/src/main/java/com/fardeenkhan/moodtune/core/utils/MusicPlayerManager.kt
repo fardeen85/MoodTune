@@ -23,7 +23,12 @@ import kotlinx.coroutines.launch
 
 import kotlinx.coroutines.SupervisorJob
 
-class MusicPlayerManager(context: Context) {
+import com.fardeenkhan.moodtune.domain.repo.SongsRepository
+
+class MusicPlayerManager(
+    context: Context,
+    private val songsRepository: SongsRepository
+) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
 
@@ -60,10 +65,22 @@ class MusicPlayerManager(context: Context) {
 
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                 updateState()
+                mediaItem?.mediaId?.let { songId ->
+                    scope.launch(Dispatchers.IO) {
+                        try {
+                            songsRepository.incrementSongPlayCount(songId)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                    }
+                }
             }
 
             override fun onPlaybackStateChanged(state: Int) {
                 updateState()
+                if (state == Player.STATE_ENDED) {
+                    _playbackState.value = PlaybackState()
+                }
             }
         })
         updateState()
@@ -93,7 +110,8 @@ class MusicPlayerManager(context: Context) {
             progress = controller.currentPosition,
             duration = controller.duration.coerceAtLeast(0L),
             hasNext = controller.hasNextMediaItem(),
-            hasPrevious = controller.hasPreviousMediaItem()
+            hasPrevious = controller.hasPreviousMediaItem(),
+            isShuffleEnabled = controller.shuffleModeEnabled
         )
     }
 
@@ -155,6 +173,12 @@ class MusicPlayerManager(context: Context) {
         mediaController?.seekTo(position)
     }
 
+    fun toggleShuffle() {
+        val controller = mediaController ?: return
+        controller.shuffleModeEnabled = !controller.shuffleModeEnabled
+        updateState()
+    }
+
     fun release() {
         stopProgressUpdate()
         controllerFuture?.let {
@@ -162,6 +186,7 @@ class MusicPlayerManager(context: Context) {
         }
         controllerFuture = null
         mediaController = null
+        _playbackState.value = PlaybackState()
     }
 }
 
@@ -172,5 +197,6 @@ data class PlaybackState(
     val progress: Long = 0L,
     val duration: Long = 0L,
     val hasNext: Boolean = false,
-    val hasPrevious: Boolean = false
+    val hasPrevious: Boolean = false,
+    val isShuffleEnabled: Boolean = false
 )

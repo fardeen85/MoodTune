@@ -214,7 +214,12 @@ class MediaPlaybackService : MediaSessionService() {
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        android.util.Log.d("MediaPlaybackService", "onTaskRemoved called")
         clearWidget()
+        mediaSession?.player?.let { player ->
+            player.pause()
+        }
         stopSelf()
     }
 

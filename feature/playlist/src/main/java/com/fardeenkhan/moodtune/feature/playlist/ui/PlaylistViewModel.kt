@@ -1,5 +1,7 @@
 package com.fardeenkhan.moodtune.feature.playlist.ui
 
+import android.net.Uri
+import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fardeenkhan.moodtune.domain.model.Playlist
@@ -23,12 +25,15 @@ import java.util.UUID
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import java.net.URI
+import java.net.URL
 
 data class DeviceFile(
     val id: String,
     val name: String,
     val path: String,
-    val imageUrl: String? = null,
+    val imageUrl: Uri? = null,
+    val localAlbumArtPath: String? = null,
     val isSelected: Boolean = false
 )
 
@@ -106,6 +111,19 @@ class PlaylistViewModel(
                     playlistRepository.deletePlaylist(intent.playlistId)
                 }
             }
+            is PlaylistIntent.ToggleShuffle -> {
+                musicPlayerManager.toggleShuffle()
+                _state.update { it.copy(isShuffleEnabled = !it.isShuffleEnabled) }
+            }
+            is PlaylistIntent.RemoveSong -> {
+                val currentPlaylist = _state.value.currentPlaylist ?: return
+                val updatedSongs = currentPlaylist.songs.filter { it.id != intent.songId }
+                val updatedPlaylist = currentPlaylist.copy(songs = updatedSongs)
+                _state.update { it.copy(currentPlaylist = updatedPlaylist) }
+                viewModelScope.launch {
+                    playlistRepository.savePlaylist(updatedPlaylist)
+                }
+            }
         }
     }
 
@@ -169,7 +187,8 @@ class PlaylistViewModel(
                                 id = song.id,
                                 name = song.title,
                                 path = song.externalUrl ?: "",
-                                imageUrl = song.imageUrl,
+                                imageUrl = song.imageUrl?.toUri(),
+                                localAlbumArtPath = song.localAlbumArtPath,
                                 isSelected = false
                             )
                         },
@@ -222,7 +241,8 @@ data class PlaylistState(
     val draggedSongId: String? = null,
     val isLoadingPlaylists: Boolean = false,
     val isLoadingCurrentPlaylist: Boolean = false,
-    val isLoadingDeviceSongs: Boolean = false
+    val isLoadingDeviceSongs: Boolean = false,
+    val isShuffleEnabled: Boolean = false
 )
 
 sealed class PlaylistIntent {
@@ -237,4 +257,6 @@ sealed class PlaylistIntent {
     data class StartDrag(val songId: String) : PlaylistIntent()
     object EndDrag : PlaylistIntent()
     data class DeletePlaylist(val playlistId: String) : PlaylistIntent()
+    object ToggleShuffle : PlaylistIntent()
+    data class RemoveSong(val songId: String) : PlaylistIntent()
 }

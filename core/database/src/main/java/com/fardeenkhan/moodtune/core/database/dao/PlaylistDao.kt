@@ -39,8 +39,22 @@ interface PlaylistDao {
     """)
     fun getRecentlyPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongEntity>>>
 
-    @Query("UPDATE playlists SET lastPlayedAt = :timestamp WHERE id = :id")
+    @Transaction
+    @Query("""
+        SELECT * FROM playlists
+        LEFT JOIN playlist_song_cross_ref ON playlists.id = playlist_song_cross_ref.playlistId
+        LEFT JOIN songs ON songs.id = playlist_song_cross_ref.songId
+        WHERE playlists.playCount > 0
+        ORDER BY playlists.playCount DESC, playlists.lastPlayedAt DESC, playlist_song_cross_ref.position ASC
+        LIMIT 10
+    """)
+    fun getMostPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongEntity>>>
+
+    @Query("UPDATE playlists SET playCount = playCount + 1, lastPlayedAt = :timestamp WHERE id = :id")
     suspend fun updateLastPlayedAt(id: String, timestamp: Long)
+
+    @Query("SELECT * FROM playlists WHERE id = :id")
+    suspend fun getPlaylistEntityById(id: String): PlaylistEntity?
 
     @Transaction
     @Query("""

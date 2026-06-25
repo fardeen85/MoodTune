@@ -3,6 +3,7 @@ package com.fardeenkhan.moodtune.domain.usecase
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
+import java.net.UnknownHostException
 import java.util.UUID
 
 class GeneratePlaylistUseCase(
@@ -36,8 +37,21 @@ class GeneratePlaylistUseCase(
             playlistRepository.savePlaylist(playlist)
 
             Result.Success
+        } catch (e: UnknownHostException) {
+            Result.Error("No internet connection. Check your network and try again.")
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Unknown error")
+            val message = when {
+                e.javaClass.simpleName.contains("Timeout", ignoreCase = true) ||
+                e.cause?.javaClass?.simpleName?.contains("Timeout", ignoreCase = true) == true ->
+                    "Request timed out. Please try again."
+                e.javaClass.simpleName.contains("Serialization", ignoreCase = true) ||
+                e.cause?.javaClass?.simpleName?.contains("Serialization", ignoreCase = true) == true ->
+                    "Couldn't read the AI response. Please try again."
+                e.message?.contains("429") == true || e.message?.contains("quota", ignoreCase = true) == true ->
+                    "AI rate limit reached. Please wait a moment and try again."
+                else -> "Something went wrong. Please try again."
+            }
+            Result.Error(message)
         }
     }
 }

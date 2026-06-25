@@ -78,3 +78,6 @@ data class YouTubeThumbnails(
 data class YouTubeThumbnail(
     val url: String
 )
+
+@Serializable
+data class LyricLineDto(val ms: Long, val line: String)

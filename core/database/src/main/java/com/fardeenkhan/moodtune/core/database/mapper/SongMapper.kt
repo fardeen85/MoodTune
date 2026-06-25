@@ -15,7 +15,10 @@ fun Song.toEntity(): SongEntity {
         externalUrl = externalUrl,
         mood = mood,
         energy = energy,
-        explanation = explanation.toEntity()
+        explanation = explanation.toEntity(),
+        durationMs = durationMs,
+        lyrics = null,
+        localAlbumArtPath = localAlbumArtPath
     )
 }
 
@@ -37,7 +40,9 @@ fun SongEntity.toDomain(): Song {
         externalUrl = externalUrl,
         mood = mood,
         energy = energy,
-        explanation = explanation.toDomain(id)
+        explanation = explanation.toDomain(id),
+        durationMs = durationMs,
+        localAlbumArtPath = localAlbumArtPath
     )
 }
 

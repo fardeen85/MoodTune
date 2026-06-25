@@ -41,19 +41,42 @@ import org.koin.android.ext.android.inject
 
 
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
+import coil3.compose.AsyncImage
+
 class MainActivity : ComponentActivity() {
     private val musicPlayerManager: MusicPlayerManager by inject()
-
+ 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             MoodTuneTheme {
-                MainScreen()
+                MainScreen(musicPlayerManager)
             }
         }
     }
-
+ 
     override fun onDestroy() {
         super.onDestroy()
         if (isFinishing) {
@@ -61,13 +84,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
-
+ 
 @Composable
-fun MainScreen() {
+fun MainScreen(musicPlayerManager: MusicPlayerManager) {
     val backStack = rememberNavBackStack(Route.Home)
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
     
+    val playbackState by musicPlayerManager.playbackState.collectAsState()
     var isNavigationBarVisible by remember { mutableStateOf(true) }
     
     val nestedScrollConnection = remember(isLandscape) {
@@ -84,12 +108,12 @@ fun MainScreen() {
             }
         }
     }
-
+ 
     // Reset visibility when orientation changes
     LaunchedEffect(isLandscape) {
         isNavigationBarVisible = true
     }
-
+ 
     BackHandler(enabled = backStack.size > 1 || backStack.last() != Route.Home) {
         if (backStack.last() != Route.Home) {
             // Remove everything until Home is reached
@@ -105,7 +129,7 @@ fun MainScreen() {
             backStack.removeAt(backStack.size - 1)
         }
     }
-
+ 
     val adaptiveInfo = currentWindowAdaptiveInfo()
     val defaultLayoutType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(adaptiveInfo)
     
@@ -114,7 +138,7 @@ fun MainScreen() {
     } else {
         defaultLayoutType
     }
-
+ 
     NavigationSuiteScaffold(
         modifier = Modifier
             .fillMaxSize()
@@ -153,32 +177,158 @@ fun MainScreen() {
             )
         }
     ) {
-        NavDisplay(
-            backStack = backStack,
-            onBack = { 
-                if (backStack.size > 1) {
-                    backStack.removeAt(backStack.size - 1)
+        Box(modifier = Modifier.fillMaxSize()) {
+            NavDisplay(
+                backStack = backStack,
+                onBack = { 
+                    if (backStack.size > 1) {
+                        backStack.removeAt(backStack.size - 1)
+                    }
+                },
+                modifier = Modifier.consumeWindowInsets(WindowInsets.navigationBars),
+                entryProvider = entryProvider {
+                    entry<Route.Home> {
+                        HomeScreenRoot(
+                            onNavigateToPlaylist = { mood ->
+                                backStack.add(Route.Playlist(mood))
+                            },
+                            isPlaying = playbackState.isPlaying,
+                            onNowPlayingClick = {
+                                if (backStack.last() != Route.NowPlaying) {
+                                    backStack.add(Route.NowPlaying)
+                                }
+                            }
+                        )
+                    }
+                    entry<Route.Playlist> { route ->
+                        PlaylistScreenRoot(
+                            initialMood = route.mood,
+                            onNavigateToNowPlaying = { backStack.add(Route.NowPlaying) },
+                            isPlaying = playbackState.isPlaying,
+                            onNowPlayingClick = {
+                                if (backStack.last() != Route.NowPlaying) {
+                                    backStack.add(Route.NowPlaying)
+                                }
+                            }
+                        )
+                    }
+                    entry<Route.NowPlaying> {
+                        NowPlayingScreenRoot()
+                    }
                 }
-            },
-            modifier = Modifier.consumeWindowInsets(WindowInsets.navigationBars),
-            entryProvider = entryProvider {
-                entry<Route.Home> {
-                    HomeScreenRoot(
-                        onNavigateToPlaylist = { mood ->
-                            backStack.add(Route.Playlist(mood))
-                        }
+            )
+
+            // MiniPlayer commented out — replaced by NowPlayingIndicator in each screen's top bar
+//            val song = playbackState.currentSong
+//            if (song != null) {
+//                Box(
+//                    modifier = Modifier
+//                        .align(Alignment.BottomCenter)
+//                        .padding(horizontal = 16.dp, vertical = 8.dp)
+//                ) {
+//                    MiniPlayer(
+//                        playbackState = playbackState,
+//                        onPlayPauseClick = { musicPlayerManager.togglePlayPause() },
+//                        onDismissClick = { musicPlayerManager.release() },
+//                        onClick = { backStack.add(Route.NowPlaying) }
+//                    )
+//                }
+//            }
+        }
+    }
+}
+
+@Composable
+fun MiniPlayer(
+    playbackState: com.fardeenkhan.moodtune.core.utils.PlaybackState,
+    onPlayPauseClick: () -> Unit,
+    onDismissClick: () -> Unit,
+    onClick: () -> Unit
+) {
+    val song = playbackState.currentSong ?: return
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .clickable { onClick() },
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.95f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.1f))
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                if (song.imageUrl != null) {
+                    AsyncImage(
+                        model = song.imageUrl,
+                        contentDescription = "${song.title} album art",
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Gray.copy(alpha = 0.3f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.LightGray)
+                    }
+                }
+                
+                Spacer(modifier = Modifier.width(12.dp))
+                
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = song.title,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = song.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.LightGray,
+                        maxLines = 1
                     )
                 }
-                entry<Route.Playlist> { route ->
-                    PlaylistScreenRoot(
-                        initialMood = route.mood,
-                        onNavigateToNowPlaying = { backStack.add(Route.NowPlaying) }
+                
+                IconButton(onClick = onPlayPauseClick) {
+                    Icon(
+                        imageVector = if (playbackState.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                        tint = Color(0xFFFF5722)
                     )
                 }
-                entry<Route.NowPlaying> {
-                    NowPlayingScreenRoot()
+                
+                IconButton(onClick = onDismissClick) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Dismiss",
+                        tint = Color.LightGray
+                    )
                 }
             }
-        )
+            
+            // Linear Progress Bar at bottom
+            val progressFraction = if (playbackState.duration > 0) {
+                playbackState.progress.toFloat() / playbackState.duration
+            } else 0f
+            
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth(progressFraction)
+                    .height(3.dp)
+                    .background(Color(0xFFFF5722))
+            )
+        }
     }
 }

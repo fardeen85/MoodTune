@@ -15,7 +15,9 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +32,7 @@ import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaf
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.Brush
@@ -38,10 +41,13 @@ import androidx.compose.ui.graphics.asComposePath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
@@ -54,13 +60,14 @@ import coil3.compose.AsyncImage
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel2
+import com.fardeenkhan.moodtune.domain.model.LyricLine
 import com.fardeenkhan.moodtune.domain.model.Song
 import java.io.File
 import org.koin.compose.viewmodel.koinViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.atan2
 import kotlin.math.PI
+import kotlin.math.atan2
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
@@ -81,9 +88,9 @@ fun MorphingControl(
     val isPressed by interactionSource.collectIsPressedAsState()
     val scope = rememberCoroutineScope()
     var isAnimTriggered by remember { mutableStateOf(false) }
-    
+
     val morph = remember(baseShape, morphShape) { Morph(baseShape, morphShape) }
-    
+
     val morphProgress by animateFloatAsState(
         targetValue = if (isPressed || isAnimTriggered) 1f else 0f,
         animationSpec = spring(dampingRatio = 0.5f, stiffness = 600f),
@@ -111,7 +118,7 @@ fun MorphingControl(
                         isAnimTriggered = false
                     }
                     onClick()
-                    Log.d("TAG","clicked invoked")
+                    Log.d("TAG", "clicked invoked")
                 }
             )
             .drawWithCache {
@@ -120,14 +127,13 @@ fun MorphingControl(
                     matrix.setScale(this.size.width, this.size.height)
                     val androidPath = morph.toPath(morphProgress)
                     androidPath.transform(matrix)
-                    
+
                     val alpha = if (containerColor != Color.Transparent) {
                         if (enabled) 1f else 0.3f
                     } else {
-                        // Animate alpha based on morph progress to support return animation
                         0.2f * morphProgress
                     }
-                    
+
                     if (alpha > 0.01f) {
                         drawPath(
                             path = androidPath.asComposePath(),
@@ -141,8 +147,8 @@ fun MorphingControl(
         AnimatedContent(
             targetState = icon,
             transitionSpec = {
-                (fadeIn(animationSpec = spring(stiffness = 400f)) + 
-                 scaleIn(initialScale = 0.7f, animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f)))
+                (fadeIn(animationSpec = spring(stiffness = 400f)) +
+                        scaleIn(initialScale = 0.7f, animationSpec = spring(dampingRatio = 0.5f, stiffness = 400f)))
                     .togetherWith(fadeOut(animationSpec = spring(stiffness = 400f)))
             },
             label = "iconTransition"
@@ -164,12 +170,10 @@ fun NowPlayingScreenRoot() {
     val navigator = rememberListDetailPaneScaffoldNavigator<Nothing>()
     val scope = rememberCoroutineScope()
 
-    // Force navigate to Detail pane so it shows the player immediately on Compact screens
     LaunchedEffect(Unit) {
         navigator.navigateTo(ListDetailPaneScaffoldRole.Detail)
     }
 
-    // Handle back navigation within the Two-Pane scaffold (e.g., from Player to Queue on phone)
     BackHandler(enabled = navigator.canNavigateBack()) {
         scope.launch {
             navigator.navigateBack()
@@ -185,9 +189,8 @@ fun NowPlayingScreenRoot() {
             QueueList(
                 queue = queue,
                 currentSongId = state.currentSong?.id,
-                onSongClick = { index -> 
+                onSongClick = { index ->
                     viewModel.onIntent(SongDetailIntent.PlayFromQueue(index))
-                    // Switch to Player pane if in single-pane mode
                     scope.launch {
                         navigator.navigateTo(ListDetailPaneScaffoldRole.Detail)
                     }
@@ -228,10 +231,8 @@ fun QueueList(
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.padding(bottom = 16.dp)
         )
-        
-        androidx.compose.foundation.lazy.LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
             itemsIndexed(queue) { index, song ->
                 val isPlaying = song.id == currentSongId
                 Row(
@@ -250,19 +251,20 @@ fun QueueList(
                             .background(MaterialTheme.colorScheme.surfaceVariant),
                         contentAlignment = Alignment.Center
                     ) {
-                        if (song.imageUrl != null) {
+                        val queueArtModel = song.localAlbumArtPath?.let { java.io.File(it) } ?: song.imageUrl
+                        if (queueArtModel != null) {
                             AsyncImage(
-                                model = song.imageUrl,
+                                model = queueArtModel,
                                 contentDescription = null,
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                contentScale = ContentScale.Crop
                             )
                         } else {
                             Icon(Icons.Default.MusicNote, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    
+
                     Spacer(modifier = Modifier.width(16.dp))
-                    
+
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = song.title,
@@ -277,7 +279,7 @@ fun QueueList(
                             maxLines = 1
                         )
                     }
-                    
+
                     if (isPlaying) {
                         Icon(
                             Icons.AutoMirrored.Filled.VolumeUp,
@@ -292,6 +294,75 @@ fun QueueList(
     }
 }
 
+@Composable
+fun SyncedLyricsPanel(
+    lines: List<LyricLine>,
+    progressMs: Long,
+    modifier: Modifier = Modifier
+) {
+    val activeIndex by remember(progressMs, lines) {
+        derivedStateOf { lines.indexOfLast { it.ms <= progressMs }.coerceAtLeast(0) }
+    }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(activeIndex) {
+        listState.animateScrollToItem(activeIndex, scrollOffset = -200)
+    }
+
+    Box(modifier = modifier.clip(RoundedCornerShape(24.dp))) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(vertical = 80.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            itemsIndexed(lines) { index, lyric ->
+                val isActive = index == activeIndex
+                val lineScale by animateFloatAsState(
+                    targetValue = if (isActive) 1.05f else 1f,
+                    animationSpec = spring(dampingRatio = 0.6f, stiffness = 400f),
+                    label = "lyricScale"
+                )
+                Text(
+                    text = lyric.line,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isActive) Color.White else Color.White.copy(alpha = 0.35f),
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .graphicsLayer(scaleX = lineScale, scaleY = lineScale)
+                        .padding(vertical = 10.dp, horizontal = 16.dp)
+                )
+            }
+        }
+      /*  // Top fade mask
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .align(Alignment.TopCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Black.copy(alpha = 0.95f), Color.Transparent)
+                    )
+                )
+        )
+        // Bottom fade mask
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(80.dp)
+                .align(Alignment.BottomCenter)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color.Transparent, Color.Black.copy(alpha = 0.95f))
+                    )
+                )
+        )*/
+    }
+}
+
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun NowPlayingScreen(
@@ -302,22 +373,58 @@ fun NowPlayingScreen(
     val scrollState = rememberScrollState()
     val context = LocalContext.current
     val albumArtColor by viewModel.dominantColor.collectAsState()
-    
+    val lyricsState by viewModel.lyricsState.collectAsState()
+
     val currentSong = state.currentSong
     val isExternal = currentSong?.externalUrl?.startsWith("http") == true
     val fileExists = currentSong?.externalUrl?.let { if (!it.startsWith("http")) File(it).exists() else false } ?: false
     val isMissingLocal = !isExternal && !fileExists && currentSong != null
 
-    // Local states for smooth seeking
+    val showLyricsMode = lyricsState is LyricsState.Loaded || lyricsState is LyricsState.Loading
+
     var isDragging by remember { mutableStateOf(false) }
     var dragProgress by remember { mutableFloatStateOf(0f) }
 
+    val animatedBackgroundColor by animateColorAsState(
+        targetValue = albumArtColor ?: Color.Black,
+        animationSpec = tween(durationMillis = 1000),
+        label = "backgroundColor"
+    )
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
+        // Blurred color background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(animatedBackgroundColor.copy(alpha = 0.5f))
+                .blur(40.dp)
+        )
+
+        // Dimming overlay
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.3f))
+        )
+
+        // Radial gradient accent for depth
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(
+                            (albumArtColor ?: Color.Transparent).copy(alpha = 0.25f),
+                            Color.Transparent
+                        ),
+                        radius = 900f
+                    )
+                )
+        )
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.background)
                 .systemBarsPadding()
                 .verticalScroll(scrollState)
                 .padding(24.dp),
@@ -335,98 +442,279 @@ fun NowPlayingScreen(
                 Text(
                     text = "NOW PLAYING",
                     style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = Color.White.copy(alpha = 0.7f)
                 )
-                IconButton(onClick = { }) {
-                    Icon(Icons.Default.Share, contentDescription = "Share", tint = Color.White)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Album Art
-            if (currentSong?.imageUrl != null) {
-                AsyncImage(
-                    model = currentSong.imageUrl,
-                    contentDescription = "Album Art",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(250.dp)
-                        .clip(RoundedCornerShape(24.dp)),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                )
-            } else {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(250.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(SurfaceLevel1),
-                    contentAlignment = Alignment.Center
+                IconButton(
+                    onClick = {
+                        if (showLyricsMode) {
+                            viewModel.onIntent(SongDetailIntent.DismissLyrics)
+                        } else {
+                            viewModel.onIntent(SongDetailIntent.RequestLyrics)
+                        }
+                    }
                 ) {
                     Icon(
-                        Icons.Default.MusicNote,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(64.dp)
+                        imageVector = if (showLyricsMode) Icons.Default.Close else Icons.Default.Lyrics,
+                        contentDescription = if (showLyricsMode) "Close Lyrics" else "Generate Lyrics",
+                        tint = if (showLyricsMode) Color.White else Color.White.copy(alpha = 0.8f)
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(48.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
-            // Song Info
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Compact header (small art + title/artist) — visible only in lyrics mode
+            AnimatedVisibility(
+                visible = showLyricsMode,
+                enter = fadeIn(tween(300)) + slideInVertically(tween(300)),
+                exit = fadeOut(tween(300)) + slideOutVertically(tween(300))
             ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = currentSong?.title ?: "No Song Playing",
-                        style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onBackground,
-                        modifier = Modifier.basicMarquee()
-                    )
-                    Text(
-                        text = currentSong?.artist ?: "Unknown Artist",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 20.sp
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 16.dp)
+                ) {
+                    val headerArtModel = currentSong?.localAlbumArtPath?.let { java.io.File(it) } ?: currentSong?.imageUrl
+                    if (headerArtModel != null) {
+                        AsyncImage(
+                            model = headerArtModel,
+                            contentDescription = "Album Art",
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.Crop
                         )
-                    )
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(SurfaceLevel1),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.MusicNote, contentDescription = null, tint = Color.White.copy(0.5f))
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text(
+                            text = currentSong?.title ?: "",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = currentSong?.artist ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.6f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
+            // Center zone: album art ↔ lyrics panel (crossfade)
+            AnimatedContent(
+                targetState = lyricsState,
+                transitionSpec = {
+                    fadeIn(tween(400)) togetherWith fadeOut(tween(400))
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(350.dp),
+                label = "centerZone"
+            ) { lyricState ->
+                when (lyricState) {
+                    is LyricsState.Loaded -> {
+                        SyncedLyricsPanel(
+                            lines = lyricState.lines,
+                            progressMs = state.progress,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+
+                    is LyricsState.Loading -> {
+                        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                CircularWavyProgressIndicator(color = Color.White, modifier = Modifier.size(48.dp))
+                                Spacer(modifier = Modifier.height(20.dp))
+                                Text(
+                                    "Generating lyrics…",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.White.copy(alpha = 0.7f)
+                                )
+                            }
+                        }
+                    }
+
+                    is LyricsState.Error -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clip(RoundedCornerShape(24.dp))
+                                .background(SurfaceLevel1),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
+                                Icon(
+                                    Icons.Default.ErrorOutline,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(48.dp)
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                Text(
+                                    lyricState.message,
+                                    color = Color.White.copy(alpha = 0.7f),
+                                    textAlign = TextAlign.Center,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                TextButton(onClick = { viewModel.onIntent(SongDetailIntent.RetryLyrics) }) {
+                                    Text("Retry", color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        }
+                    }
+
+                    LyricsState.Idle -> {
+                        val mainArtModel = currentSong?.localAlbumArtPath?.let { java.io.File(it) } ?: currentSong?.imageUrl
+                    if (mainArtModel != null) {
+                            AsyncImage(
+                                model = mainArtModel,
+                                contentDescription = "Album Art",
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(24.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(24.dp))
+                                    .background(SurfaceLevel1),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.MusicNote,
+                                    contentDescription = null,
+                                    tint = Color.White.copy(alpha = 0.5f),
+                                    modifier = Modifier.size(64.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Song info (title + artist) — hidden in lyrics mode (replaced by compact header)
+            AnimatedVisibility(
+                visible = !showLyricsMode,
+                enter = fadeIn(tween(300)),
+                exit = fadeOut(tween(300))
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = currentSong?.title ?: "No Song Playing",
+                            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.Bold),
+                            color = Color.White,
+                            modifier = Modifier.basicMarquee()
+                        )
+                        Text(
+                            text = currentSong?.artist ?: "Unknown Artist",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontSize = 20.sp
+                            )
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Seekbar
+            if (!isMissingLocal && !isExternal) {
+                var seekbarSize by remember { mutableStateOf(IntSize.Zero) }
+                val currentProgress = if (state.duration > 0) state.progress.toFloat() / state.duration else 0f
+                val displayProgress = if (isDragging) dragProgress else currentProgress
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(32.dp)
+                            .onGloballyPositioned { seekbarSize = it.size }
+                            .pointerInput(Unit) {
+                                detectTapGestures(
+                                    onTap = { offset ->
+                                        val newProgress = (offset.x / seekbarSize.width).coerceIn(0f, 1f)
+                                        viewModel.onIntent(SongDetailIntent.SeekTo((newProgress * state.duration).toLong()))
+                                    }
+                                )
+                            }
+                            .pointerInput(Unit) {
+                                detectDragGestures(
+                                    onDragStart = { offset ->
+                                        isDragging = true
+                                        dragProgress = (offset.x / seekbarSize.width).coerceIn(0f, 1f)
+                                    },
+                                    onDragEnd = { isDragging = false },
+                                    onDragCancel = { isDragging = false },
+                                    onDrag = { change, _ ->
+                                        change.consume()
+                                        dragProgress = (change.position.x / seekbarSize.width).coerceIn(0f, 1f)
+                                        viewModel.onIntent(SongDetailIntent.SeekTo((dragProgress * state.duration).toLong()))
+                                    }
+                                )
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        LinearWavyProgressIndicator(
+                            progress = { displayProgress },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(12.dp),
+                            color = MaterialTheme.colorScheme.primary,
+                            amplitude = { 1f },
+                            wavelength = 20.dp
+                        )
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val displayMs = if (isDragging) (dragProgress * state.duration).toLong() else state.progress
+                        Text(formatTime(displayMs), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                        Text(formatTime(state.duration), style = MaterialTheme.typography.bodySmall, color = Color.White.copy(alpha = 0.7f))
+                    }
+                }
+            }
 
             Spacer(modifier = Modifier.height(32.dp))
 
             // Controls
-            Box( modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center){
-
-                // Glassy Effect
-                albumArtColor?.let { color ->
-                    Box(
-                        modifier = Modifier
-                            .size(250.dp)
-                            .graphicsLayer {
-                                alpha = 0.8f
-                            }
-                            .background(
-                                brush = Brush.radialGradient(
-                                    colors = listOf(color, Color.Transparent)
-                                ),
-                                shape = CircleShape
-                            )
-                    )
-                }
-
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceEvenly,
                     verticalAlignment = Alignment.CenterVertically
-                )
-                {
+                ) {
                     MorphingControl(
                         onClick = { viewModel.onIntent(SongDetailIntent.SkipPrevious) },
                         icon = Icons.Default.SkipPrevious,
@@ -439,14 +727,15 @@ fun NowPlayingScreen(
                     )
 
                     if (isMissingLocal || isExternal) {
-                        // Show Spotify & YouTube buttons instead of Play/Pause
                         Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                             IconButton(
                                 onClick = {
                                     val spotifyUri = "spotify:search:${currentSong?.title} ${currentSong?.artist}"
                                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(spotifyUri)))
                                 },
-                                modifier = Modifier.size(64.dp).background(Color(0xFF1DB954), CircleShape)
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .background(Color(0xFF1DB954), CircleShape)
                             ) {
                                 Icon(
                                     painter = painterResource(id = com.fardeenkhan.moodtune.core.ui.R.drawable.spotify_logo),
@@ -461,7 +750,9 @@ fun NowPlayingScreen(
                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(it)))
                                     }
                                 },
-                                modifier = Modifier.size(64.dp).background(Color.White, CircleShape)
+                                modifier = Modifier
+                                    .size(64.dp)
+                                    .background(Color.White, CircleShape)
                             ) {
                                 Icon(
                                     painter = painterResource(id = com.fardeenkhan.moodtune.core.ui.R.drawable.youtube_logo),
@@ -472,71 +763,17 @@ fun NowPlayingScreen(
                             }
                         }
                     } else {
-                        var boxSize by remember { mutableStateOf(IntSize.Zero) }
-                        val currentProgress = if (state.duration > 0) state.progress.toFloat() / state.duration else 0f
-                        val displayProgress = if (isDragging) dragProgress else currentProgress
-
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.size(160.dp)
-                        ) {
-
-
-                            // Seeking Container (Behind the button)
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .onGloballyPositioned { boxSize = it.size }
-                                    .pointerInput(Unit) {
-                                        detectTapGestures(
-                                            onTap = { offset ->
-                                                val newProgress = calculateProgressFromOffset(offset, boxSize)
-                                                viewModel.onIntent(SongDetailIntent.SeekTo((newProgress * state.duration).toLong()))
-                                            }
-                                        )
-                                    }
-                                    .pointerInput(Unit) {
-                                        detectDragGestures(
-                                            onDragStart = { offset ->
-                                                isDragging = true
-                                                dragProgress = calculateProgressFromOffset(offset, boxSize)
-                                            },
-                                            onDragEnd = { isDragging = false },
-                                            onDragCancel = { isDragging = false },
-                                            onDrag = { change, _ ->
-                                                change.consume()
-                                                dragProgress = calculateProgressFromOffset(change.position, boxSize)
-                                                viewModel.onIntent(SongDetailIntent.SeekTo((dragProgress * state.duration).toLong()))
-                                            }
-                                        )
-                                    }
-                            ) {
-                                CircularWavyProgressIndicator(
-                                    progress = { displayProgress },
-                                    modifier = Modifier.fillMaxSize(),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    amplitude = { 1f },
-                                    wavelength = 20.dp
-                                )
-                            }
-
-                            // Play/Pause Button (Top Layer, Independent)
-                            Box(contentAlignment = Alignment.Center) {
-
-
-                                MorphingControl(
-                                    onClick = { viewModel.onIntent(SongDetailIntent.TogglePlayPause) },
-                                    icon = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                    contentDescription = if (state.isPlaying) "Pause" else "Play",
-                                    containerColor = Color.White,
-                                    contentColor = Color.Black,
-                                    size = 88.dp,
-                                    iconSize = 48.dp,
-                                    baseShape = MaterialShapes.Cookie7Sided,
-                                    morphShape = MaterialShapes.PuffyDiamond
-                                )
-                            }
-                        }
+                        MorphingControl(
+                            onClick = { viewModel.onIntent(SongDetailIntent.TogglePlayPause) },
+                            icon = if (state.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                            contentDescription = if (state.isPlaying) "Pause" else "Play",
+                            containerColor = Color.White,
+                            contentColor = Color.Black,
+                            size = 88.dp,
+                            iconSize = 48.dp,
+                            baseShape = MaterialShapes.Cookie7Sided,
+                            morphShape = MaterialShapes.PuffyDiamond
+                        )
                     }
 
                     MorphingControl(
@@ -550,20 +787,6 @@ fun NowPlayingScreen(
                         morphShape = MaterialShapes.Circle
                     )
                 }
-
-
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-            
-            // Times
-            Row(
-                modifier = Modifier.fillMaxWidth(0.8f),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val displayMs = if (isDragging) (dragProgress * state.duration).toLong() else state.progress
-                Text(formatTime(displayMs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Text(formatTime(state.duration), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
 
             Spacer(modifier = Modifier.height(48.dp))
@@ -573,7 +796,7 @@ fun NowPlayingScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // YouTube Button (Full width)
+            // YouTube Button
             if (currentSong?.externalUrl != null) {
                 Button(
                     onClick = {
@@ -593,11 +816,15 @@ fun NowPlayingScreen(
                             modifier = Modifier.size(24.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text("Play on YouTube", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = Color.Black)
+                        Text(
+                            "Play on YouTube",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = Color.Black
+                        )
                     }
                 }
             }
-            
+
             Spacer(modifier = Modifier.height(24.dp))
         }
 
@@ -614,16 +841,6 @@ fun NowPlayingScreen(
             }
         }
     }
-}
-
-private fun calculateProgressFromOffset(offset: androidx.compose.ui.geometry.Offset, size: IntSize): Float {
-    val centerX = size.width / 2f
-    val centerY = size.height / 2f
-    val angle = atan2(offset.y - centerY, offset.x - centerX)
-    // Adjust angle to match progress indicator (starting from top, clockwise)
-    var normalizedAngle = (angle * 180 / PI).toFloat() + 90f
-    if (normalizedAngle < 0) normalizedAngle += 360f
-    return (normalizedAngle / 360f).coerceIn(0f, 1f)
 }
 
 private fun formatTime(ms: Long): String {
@@ -651,7 +868,7 @@ fun AboutThisSongSection(song: Song) {
                 )
             }
             Spacer(modifier = Modifier.height(16.dp))
-            
+
             Text(
                 text = song.explanation.about,
                 style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
@@ -669,10 +886,9 @@ fun AboutThisSongSection(song: Song) {
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
             )
-            
+
             Spacer(modifier = Modifier.height(24.dp))
-            
-            // Stats Grid
+
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     SongStatCard("ENERGY", song.energy ?: "Medium", Modifier.weight(1f))

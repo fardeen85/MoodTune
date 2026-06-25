@@ -37,3 +37,21 @@ val OnErrorContainer = Color(0xFFFFDAD6)
 // Levels from Elevation & Depth
 val SurfaceLevel1 = Color(0xFF1E1E1E)
 val SurfaceLevel2 = Color(0xFF2A2A2A)
+
+private val moodColorPalette = listOf(
+    Color(0xFFFF5722), // Deep Orange
+    Color(0xFF4CAF50), // Green
+    Color(0xFF2196F3), // Blue
+    Color(0xFF9C27B0), // Purple
+    Color(0xFFE91E63), // Pink
+    Color(0xFFFFEB3B), // Yellow
+    Color(0xFF00BCD4), // Cyan
+    Color(0xFF673AB7), // Deep Purple
+    Color(0xFF009688), // Teal
+    Color(0xFFFF9800)  // Orange
+)
+
+fun getMoodColor(mood: String): Color {
+    val index = Math.abs(mood.lowercase().hashCode()) % moodColorPalette.size
+    return moodColorPalette[index]
+}

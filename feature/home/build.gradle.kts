@@ -45,6 +45,9 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
+    //coil
+    implementation(libs.coil.compose)
+
     // Domain & Core
     implementation(project(":domain"))
     implementation(project(":core:ui"))

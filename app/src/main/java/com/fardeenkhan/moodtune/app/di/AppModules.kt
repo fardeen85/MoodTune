@@ -26,10 +26,10 @@ val appModule = module {
     includes(networkModule)
 
     // Infrastructure
-    val geminiApiKey = "AIzaSyAy2FSZOjk3uLuTYnknpT-zOIw-WAp7woE"
+    val geminiApiKey = "AQ.Ab8RN6K8JT20j75k0ttNNqXPSBCzDqVa-1-jMfx7HLOaEYVkxw"
     val youtubeApiKey = "AIzaSyAptuISrboDdZOiCeqrpEMMPuHmaT2ksXk"
-    single { LocalSongDataSource(androidContext().contentResolver) }
-    single { MusicPlayerManager(androidContext()) }
+    single { LocalSongDataSource(androidContext()) }
+    single { MusicPlayerManager(androidContext(), get()) }
     single { GeminiAPIDataSource(get(), geminiApiKey) }
     single { YouTubeAPIDataSource(get(), youtubeApiKey) }
     
@@ -44,5 +44,5 @@ val appModule = module {
     // Feature
     viewModelOf(::PlaylistViewModel)
     viewModelOf(::HomeViewModel)
-    viewModel { SongDetailViewModel(androidContext(), get()) }
+    viewModel { SongDetailViewModel(androidContext(), get(), get()) }
 }

@@ -6,6 +6,7 @@ import kotlinx.coroutines.flow.Flow
 interface PlaylistRepository {
     fun getPlaylists(): Flow<List<Playlist>>
     fun getRecentlyPlayedPlaylists(): Flow<List<Playlist>>
+    fun getMostPlayedPlaylists(): Flow<List<Playlist>>
     fun getPlaylistById(id: String): Flow<Playlist?>
     fun getPlaylistByMoodFlow(mood: String): Flow<Playlist?>
     suspend fun markPlaylistAsPlayed(id: String)

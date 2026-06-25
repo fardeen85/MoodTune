@@ -4,6 +4,7 @@ import com.fardeenkhan.moodtune.infrastructure.remote.GeminiRequest
 import com.fardeenkhan.moodtune.infrastructure.remote.GeminiResponse
 import com.fardeenkhan.moodtune.infrastructure.remote.Content
 import com.fardeenkhan.moodtune.infrastructure.remote.Part
+import com.fardeenkhan.moodtune.infrastructure.remote.LyricLineDto
 import com.fardeenkhan.moodtune.infrastructure.remote.RecommendedSong
 import io.ktor.client.*
 import io.ktor.client.call.*
@@ -57,5 +58,37 @@ class GeminiAPIDataSource(
             .trim()
 
         return Json.decodeFromString<List<RecommendedSong>>(jsonString)
+    }
+
+    suspend fun getLyrics(title: String, artist: String, durationMs: Long): List<LyricLineDto> {
+        val prompt = """
+            Generate timestamped lyrics for "$title" by "$artist" (duration: ${durationMs}ms).
+            Return ONLY a JSON array, no markdown fences. Each element: {"ms": <milliseconds>, "line": "<lyric line>"}.
+            Space lines proportionally across the full duration. Start with {"ms":0,"line":"♪ Intro ♪"}.
+            Example: [{"ms":0,"line":"♪ Intro ♪"},{"ms":15000,"line":"First verse line here"}]
+        """.trimIndent()
+
+        val requestBody = GeminiRequest(
+            contents = listOf(Content(parts = listOf(Part(text = prompt))))
+        )
+
+        val response: GeminiResponse = client.post("$baseUrl?key=$apiKey") {
+            contentType(ContentType.Application.Json)
+            setBody(requestBody)
+            timeout {
+                requestTimeoutMillis = 60_000
+                connectTimeoutMillis = 60_000
+                socketTimeoutMillis = 60_000
+            }
+        }.body()
+
+        val textResponse = response.candidates.firstOrNull()?.content?.parts?.firstOrNull()?.text ?: ""
+        val jsonString = textResponse.trim()
+            .removePrefix("```json")
+            .removePrefix("```")
+            .removeSuffix("```")
+            .trim()
+
+        return Json.decodeFromString<List<LyricLineDto>>(jsonString)
     }
 }

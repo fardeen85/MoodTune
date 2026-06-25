@@ -87,15 +87,8 @@ class MoodTuneWidget : GlanceAppWidget() {
             modifier = GlanceModifier
                 .fillMaxSize()
                 .cornerRadius(24.dp)
+                .background(androidx.compose.ui.graphics.Color.Black)
         ) {
-            // Background Gradient
-            Image(
-                provider = ImageProvider(R.drawable.widget_gradient_bg),
-                contentDescription = null,
-                modifier = GlanceModifier.fillMaxSize(),
-                contentScale = ContentScale.FillBounds
-            )
-
             // Background Album Art (Dimmed Overlay)
             if (albumArtPath.isNotEmpty()) {
                 Image(
@@ -104,8 +97,16 @@ class MoodTuneWidget : GlanceAppWidget() {
                     modifier = GlanceModifier.fillMaxSize(),
                     contentScale = ContentScale.Crop,
                     colorFilter = androidx.glance.ColorFilter.tint(
-                        androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.3f))
+                        androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.7f))
                     )
+                )
+            } else {
+                // Background Gradient as fallback
+                Image(
+                    provider = ImageProvider(R.drawable.widget_gradient_bg),
+                    contentDescription = null,
+                    modifier = GlanceModifier.fillMaxSize(),
+                    contentScale = ContentScale.FillBounds
                 )
             }
 
@@ -133,15 +134,22 @@ class MoodTuneWidget : GlanceAppWidget() {
         albumArtPath: String,
         modifier: GlanceModifier
     ) {
+        val size = LocalSize.current
+        val isVerySmall = size.width < 140.dp
+
         Row(
             modifier = modifier,
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            AlbumArt(albumArtPath, GlanceModifier.size(48.dp))
-            Spacer(modifier = GlanceModifier.width(8.dp))
-            PlayPauseButton(isPlaying)
-            Spacer(modifier = GlanceModifier.width(8.dp))
+            AlbumArt(albumArtPath, GlanceModifier.size(if (isVerySmall) 40.dp else 48.dp))
+            Spacer(modifier = GlanceModifier.width(if (isVerySmall) 6.dp else 8.dp))
+            if (!isVerySmall) {
+                PreviousButton()
+                Spacer(modifier = GlanceModifier.width(6.dp))
+            }
+            PlayPauseButton(isPlaying, size = if (isVerySmall) 40.dp else 48.dp)
+            Spacer(modifier = GlanceModifier.width(if (isVerySmall) 6.dp else 8.dp))
             NextButton()
         }
     }
@@ -154,12 +162,15 @@ class MoodTuneWidget : GlanceAppWidget() {
         albumArtPath: String,
         modifier: GlanceModifier
     ) {
+        val size = LocalSize.current
+        val isNarrow = size.width < 220.dp
+
         Row(
             modifier = modifier,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AlbumArt(albumArtPath, GlanceModifier.size(64.dp))
-            Spacer(modifier = GlanceModifier.width(12.dp))
+            AlbumArt(albumArtPath, GlanceModifier.size(if (isNarrow) 56.dp else 64.dp))
+            Spacer(modifier = GlanceModifier.width(if (isNarrow) 8.dp else 12.dp))
             
             Column(modifier = GlanceModifier.defaultWeight().clickable(actionStartActivity(
                 Intent(LocalContext.current, Class.forName("com.fardeenkhan.moodtune.app.MainActivity"))
@@ -167,8 +178,8 @@ class MoodTuneWidget : GlanceAppWidget() {
                 Text(
                     text = trackTitle,
                     style = TextStyle(
-                        color = GlanceTheme.colors.onBackground,
-                        fontSize = 16.sp,
+                        color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFF53E076)),
+                        fontSize = if (isNarrow) 14.sp else 16.sp,
                         fontWeight = FontWeight.Bold
                     ),
                     maxLines = 1
@@ -176,8 +187,8 @@ class MoodTuneWidget : GlanceAppWidget() {
                 Text(
                     text = artistName,
                     style = TextStyle(
-                        color = GlanceTheme.colors.onSurfaceVariant,
-                        fontSize = 14.sp
+                        color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFFC9BFFF)),
+                        fontSize = if (isNarrow) 12.sp else 14.sp
                     ),
                     maxLines = 1
                 )
@@ -186,7 +197,7 @@ class MoodTuneWidget : GlanceAppWidget() {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 PreviousButton()
                 Spacer(modifier = GlanceModifier.width(8.dp))
-                PlayPauseButton(isPlaying)
+                PlayPauseButton(isPlaying, size = if (isNarrow) 40.dp else 48.dp)
                 Spacer(modifier = GlanceModifier.width(8.dp))
                 NextButton()
             }
@@ -216,7 +227,7 @@ class MoodTuneWidget : GlanceAppWidget() {
                     Text(
                         text = trackTitle,
                         style = TextStyle(
-                            color = GlanceTheme.colors.onBackground,
+                            color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFF53E076)),
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         ),
@@ -225,7 +236,7 @@ class MoodTuneWidget : GlanceAppWidget() {
                     Text(
                         text = artistName,
                         style = TextStyle(
-                            color = GlanceTheme.colors.onSurfaceVariant,
+                            color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFFC9BFFF)),
                             fontSize = 16.sp
                         ),
                         maxLines = 1
@@ -238,7 +249,7 @@ class MoodTuneWidget : GlanceAppWidget() {
             LinearProgressIndicator(
                 progress = currentProgress,
                 modifier = GlanceModifier.fillMaxWidth().height(8.dp),
-                color = GlanceTheme.colors.primary,
+                color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFF53E076)),
                 backgroundColor = GlanceTheme.colors.surfaceVariant
             )
 
@@ -260,43 +271,52 @@ class MoodTuneWidget : GlanceAppWidget() {
 
     @Composable
     private fun EmptyState(modifier: GlanceModifier) {
+        val size = LocalSize.current
+        val isSmallHeight = size.height < 120.dp
+
         Column(
             modifier = modifier,
             verticalAlignment = Alignment.CenterVertically,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Image(
-                provider = ImageProvider(R.drawable.ic_music_note),
-                contentDescription = null,
-                modifier = GlanceModifier.size(48.dp),
-                colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.primary)
-            )
-            Spacer(modifier = GlanceModifier.height(12.dp))
+            if (!isSmallHeight) {
+                Image(
+                    provider = ImageProvider(R.drawable.ic_music_note),
+                    contentDescription = null,
+                    modifier = GlanceModifier.size(48.dp),
+                    colorFilter = androidx.glance.ColorFilter.tint(androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFF53E076)))
+                )
+                Spacer(modifier = GlanceModifier.height(12.dp))
+            }
             Text(
                 text = "No song playing",
                 style = TextStyle(
-                    color = GlanceTheme.colors.onBackground,
-                    fontSize = 16.sp,
+                    color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFF53E076)),
+                    fontSize = if (isSmallHeight) 14.sp else 16.sp,
                     fontWeight = FontWeight.Bold,
                     textAlign = androidx.glance.text.TextAlign.Center
                 )
             )
-            Text(
-                text = "Pick a vibe in MoodTune",
-                style = TextStyle(
-                    color = GlanceTheme.colors.onSurfaceVariant,
-                    fontSize = 14.sp,
-                    textAlign = androidx.glance.text.TextAlign.Center
+            if (!isSmallHeight) {
+                Text(
+                    text = "Pick a vibe in MoodTune",
+                    style = TextStyle(
+                        color = androidx.glance.unit.ColorProvider(androidx.compose.ui.graphics.Color(0xFFC9BFFF)),
+                        fontSize = 14.sp,
+                        textAlign = androidx.glance.text.TextAlign.Center
+                    )
                 )
-            )
-            Spacer(modifier = GlanceModifier.height(20.dp))
+                Spacer(modifier = GlanceModifier.height(20.dp))
+            } else {
+                Spacer(modifier = GlanceModifier.height(8.dp))
+            }
             
             Box(
                 modifier = GlanceModifier
-                    .height(48.dp)
-                    .padding(horizontal = 24.dp)
+                    .height(if (isSmallHeight) 36.dp else 48.dp)
+                    .padding(horizontal = if (isSmallHeight) 16.dp else 24.dp)
                     .background(GlanceTheme.colors.primary)
-                    .cornerRadius(24.dp)
+                    .cornerRadius(if (isSmallHeight) 18.dp else 24.dp)
                     .clickable(actionStartActivity(
                         Intent(LocalContext.current, Class.forName("com.fardeenkhan.moodtune.app.MainActivity"))
                     )),
@@ -306,7 +326,8 @@ class MoodTuneWidget : GlanceAppWidget() {
                     text = "Open App",
                     style = TextStyle(
                         color = GlanceTheme.colors.onPrimary,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        fontSize = if (isSmallHeight) 12.sp else 14.sp
                     )
                 )
             }
@@ -365,7 +386,7 @@ class MoodTuneWidget : GlanceAppWidget() {
             modifier = GlanceModifier.size(32.dp).clickable(actionRunCallback<MediaActionCallback>(
                 actionParametersOf(MediaActionCallback.ACTION_KEY to "next")
             )),
-            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onBackground)
+            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.primary)
         )
     }
 
@@ -377,7 +398,7 @@ class MoodTuneWidget : GlanceAppWidget() {
             modifier = GlanceModifier.size(32.dp).clickable(actionRunCallback<MediaActionCallback>(
                 actionParametersOf(MediaActionCallback.ACTION_KEY to "previous")
             )),
-            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.onBackground)
+            colorFilter = androidx.glance.ColorFilter.tint(GlanceTheme.colors.primary)
         )
     }
 }

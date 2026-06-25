@@ -1,16 +1,19 @@
 package com.fardeenkhan.moodtune.domain.model
 
+import kotlinx.serialization.Serializable
+
 data class Song(
-    val id: String,              // unique (can be generated)
+    val id: String,
     val title: String,
     val artist: String,
-    val reason: String,          // why AI selected it
-    val imageUrl: String?,       // from Spotify/iTunes
-    val externalUrl: String?,     // YouTube or Spotify link
+    val reason: String,
+    val imageUrl: String?,
+    val externalUrl: String?,
     val mood: String?,
     val energy: String?,
-    val explanation: SongExplanation
-
+    val explanation: SongExplanation,
+    val durationMs: Long? = null,
+    val localAlbumArtPath: String? = null
 )
 
 data class Playlist(
@@ -28,3 +31,6 @@ data class SongExplanation(
     val mood: String,
     val context: String
 )
+
+@Serializable
+data class LyricLine(val ms: Long, val line: String)

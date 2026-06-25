@@ -16,7 +16,8 @@ val databaseModule = module {
             androidContext(),
             MoodTuneDatabase::class.java,
             "moodtune_database"
-        ).fallbackToDestructiveMigration().build()
+        ).addMigrations(MoodTuneDatabase.MIGRATION_2_3, MoodTuneDatabase.MIGRATION_3_4, MoodTuneDatabase.MIGRATION_4_5)
+            .fallbackToDestructiveMigration().build()
     }
 
     single { get<MoodTuneDatabase>().songDao() }

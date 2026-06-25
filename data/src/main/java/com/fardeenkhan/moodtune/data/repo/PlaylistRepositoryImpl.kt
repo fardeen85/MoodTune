@@ -25,6 +25,10 @@ class PlaylistRepositoryImpl(
         return playlistDao.getRecentlyPlayedPlaylists().map { it.toDomainList() }
     }
 
+    override fun getMostPlayedPlaylists(): Flow<List<Playlist>> {
+        return playlistDao.getMostPlayedPlaylists().map { it.toDomainList() }
+    }
+
     override suspend fun markPlaylistAsPlayed(id: String) {
         playlistDao.updateLastPlayedAt(id, System.currentTimeMillis())
     }
@@ -42,11 +46,25 @@ class PlaylistRepositoryImpl(
     }
 
     override suspend fun savePlaylist(playlist: Playlist) {
+        val existingPlaylist = playlistDao.getPlaylistEntityById(playlist.id)
+        val playCount = existingPlaylist?.playCount ?: 0
+        val lastPlayedAt = playlist.lastPlayedAt ?: existingPlaylist?.lastPlayedAt
+
         // 1. Save all songs in the playlist first (due to FK or just to ensure they exist)
-        songDao.insertSongs(playlist.songs.map { it.toEntity() })
+        val songEntities = playlist.songs.map { song ->
+            val existingSong = songDao.getSongById(song.id)
+            song.toEntity().copy(
+                playCount = existingSong?.playCount ?: 0,
+                lastPlayedAt = existingSong?.lastPlayedAt
+            )
+        }
+        songDao.insertSongs(songEntities)
         
         // 2. Save the playlist itself
-        playlistDao.insertPlaylist(playlist.toEntity())
+        playlistDao.insertPlaylist(playlist.toEntity().copy(
+            playCount = playCount,
+            lastPlayedAt = lastPlayedAt
+        ))
         
         // 3. Save the cross references
         // First clean up old refs if updating

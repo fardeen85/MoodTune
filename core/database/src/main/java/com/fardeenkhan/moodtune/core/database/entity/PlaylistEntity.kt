@@ -9,5 +9,6 @@ data class PlaylistEntity(
     val id: String,
     val mood: String,
     val createdAt: Long,
-    val lastPlayedAt: Long? = null
+    val lastPlayedAt: Long? = null,
+    val playCount: Int = 0
 )

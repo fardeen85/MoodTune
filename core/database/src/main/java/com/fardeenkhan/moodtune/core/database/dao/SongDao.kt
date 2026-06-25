@@ -23,4 +23,16 @@ interface SongDao {
 
     @Query("DELETE FROM songs WHERE id = :id")
     suspend fun deleteSongById(id: String)
+
+    @Query("UPDATE songs SET playCount = playCount + 1, lastPlayedAt = :timestamp WHERE id = :id")
+    suspend fun incrementSongPlayCount(id: String, timestamp: Long)
+
+    @Query("SELECT * FROM songs WHERE playCount > 0 ORDER BY playCount DESC, lastPlayedAt DESC LIMIT 10")
+    fun getMostPlayedSongs(): Flow<List<SongEntity>>
+
+    @Query("SELECT lyrics FROM songs WHERE id = :id")
+    suspend fun getLyricsForSong(id: String): String?
+
+    @Query("UPDATE songs SET lyrics = :lyricsJson WHERE id = :id")
+    suspend fun updateLyrics(id: String, lyricsJson: String)
 }

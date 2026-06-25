@@ -3,9 +3,12 @@ package com.fardeenkhan.moodtune.data.repo
 import com.fardeenkhan.moodtune.core.database.dao.SongDao
 import com.fardeenkhan.moodtune.core.database.mapper.toDomain
 import com.fardeenkhan.moodtune.core.database.mapper.toEntity
+import com.fardeenkhan.moodtune.domain.model.LyricLine
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
 import com.fardeenkhan.moodtune.infrastructure.datasource.GeminiAPIDataSource
 import com.fardeenkhan.moodtune.infrastructure.datasource.LocalSongDataSource
 import com.fardeenkhan.moodtune.infrastructure.datasource.YouTubeAPIDataSource
@@ -31,12 +34,36 @@ class SongsRepositoryImpl(
         }
     }
 
+    override fun getMostPlayedSongs(): Flow<List<Song>> {
+        return songDao.getMostPlayedSongs().map { entities ->
+            entities.map { it.toDomain() }
+        }
+    }
+
+    override suspend fun incrementSongPlayCount(id: String) {
+        songDao.incrementSongPlayCount(id, System.currentTimeMillis())
+    }
+
     override suspend fun saveSongs(songs: List<Song>) {
-        songDao.insertSongs(songs.map { it.toEntity() })
+        val entities = songs.map { song ->
+            song.toEntity().copy(lyrics = songDao.getLyricsForSong(song.id))
+        }
+        songDao.insertSongs(entities)
     }
 
     override suspend fun deleteSong(id: String) {
         songDao.deleteSongById(id)
+    }
+
+    override suspend fun getCachedLyrics(songId: String): List<LyricLine>? {
+        val json = songDao.getLyricsForSong(songId) ?: return null
+        return Json.decodeFromString<List<LyricLine>>(json)
+    }
+
+    override suspend fun generateLyrics(songId: String, title: String, artist: String, durationMs: Long): List<LyricLine> {
+        val lines = geminiAPIDataSource.getLyrics(title, artist, durationMs).map { LyricLine(it.ms, it.line) }
+        songDao.updateLyrics(songId, Json.encodeToString(lines))
+        return lines
     }
 
     override suspend fun generateMoodSongs(mood: String): List<Song> {
