@@ -26,8 +26,8 @@ val appModule = module {
     includes(networkModule)
 
     // Infrastructure
-    val geminiApiKey = "AIzaSyAy2FSZOjk3uLuTYnknpT-zOIw-WAp7woE"
-    val youtubeApiKey = "AIzaSyAptuISrboDdZOiCeqrpEMMPuHmaT2ksXk"
+    val geminiApiKey = ""
+    val youtubeApiKey = ""
     single { LocalSongDataSource(androidContext().contentResolver) }
     single { MusicPlayerManager(androidContext()) }
     single { GeminiAPIDataSource(get(), geminiApiKey) }
