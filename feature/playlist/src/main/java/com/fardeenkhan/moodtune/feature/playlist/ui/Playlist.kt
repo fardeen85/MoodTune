@@ -2,6 +2,8 @@
 package com.fardeenkhan.moodtune.feature.playlist.ui
 
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.window.core.layout.WindowWidthSizeClass
 
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
 import android.view.View
@@ -23,6 +25,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -57,9 +60,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -67,12 +72,12 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import coil3.compose.AsyncImage
 import com.fardeenkhan.moodtune.core.ui.components.NowPlayingIndicator
+import com.fardeenkhan.moodtune.core.ui.theme.LocalWallpaperAccent
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
-import com.fardeenkhan.moodtune.core.ui.theme.getMoodColor
+import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
-import com.fardeenkhan.moodtune.domain.model.SongExplanation
 import com.fardeenkhan.moodtune.feature.playlist.ui.components.rememberDragDropListState
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.isGranted
@@ -92,9 +97,9 @@ fun PlaylistScreenRoot(
 }
 
 sealed class PlaylistNavigation {
-    object List : PlaylistNavigation()
+    data object List : PlaylistNavigation()
     data class Detail(val mood: String) : PlaylistNavigation()
-    object DeviceFiles : PlaylistNavigation()
+    data object DeviceFiles : PlaylistNavigation()
 }
 
 
@@ -120,7 +125,14 @@ fun MusicPermissionScreen(onLoadMusic: () -> Unit) {
             permissionState.status.isGranted -> {
                 Text("Permission Granted! Showing your music...")
                 showDialog = false
-                onLoadMusic()
+                // Gated by LaunchedEffect rather than called directly here: this branch re-runs
+                // on every recomposition of this composable (including ones caused by unrelated
+                // PlaylistState changes elsewhere, since the caller passes a fresh lambda each
+                // time), and onLoadMusic() triggers a full MediaStore rescan - firing it inline
+                // would rescan the device on every single recomposition instead of once.
+                LaunchedEffect(Unit) {
+                    onLoadMusic()
+                }
             }
 
             // Case B: Show rationale or request
@@ -213,6 +225,11 @@ fun PlaylistScreen(
                 onDeletePlaylist = { id ->
                     viewModel.onIntent(PlaylistIntent.DeletePlaylist(id))
                 },
+                onCreatePlaylist = { mood ->
+                    viewModel.onIntent(PlaylistIntent.CreatePlaylist(mood))
+                    viewModel.onIntent(PlaylistIntent.SelectPlaylist(mood))
+                    navigationState = PlaylistNavigation.Detail(mood)
+                },
                 isPlaying = isPlaying,
                 onNowPlayingClick = onNowPlayingClick
             )
@@ -251,10 +268,23 @@ fun PlaylistListScreen(
     state: PlaylistState,
     onMoodClick: (String) -> Unit,
     onDeletePlaylist: (String) -> Unit,
+    onCreatePlaylist: (String) -> Unit,
     isPlaying: Boolean = false,
     onNowPlayingClick: () -> Unit = {}
 ) {
     var playlistToDelete by remember { mutableStateOf<Playlist?>(null) }
+    var showCreateDialog by remember { mutableStateOf(false) }
+    var newPlaylistMood by remember { mutableStateOf("") }
+
+    // Landscape phones and unfolded/large foldables give the grid a lot more width; a fixed
+    // 3-column grid would stretch each square album folder to a huge size, so add columns
+    // as the window widens instead of growing each cell.
+    val widthSizeClass = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass
+    val gridColumns = when (widthSizeClass) {
+        WindowWidthSizeClass.EXPANDED -> 6
+        WindowWidthSizeClass.MEDIUM -> 5
+        else -> 3
+    }
 
     if (playlistToDelete != null) {
         AlertDialog(
@@ -280,8 +310,56 @@ fun PlaylistListScreen(
         )
     }
 
+    if (showCreateDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showCreateDialog = false
+                newPlaylistMood = ""
+            },
+            title = { Text("New Playlist") },
+            text = {
+                OutlinedTextField(
+                    value = newPlaylistMood,
+                    onValueChange = { newPlaylistMood = it },
+                    label = { Text("Playlist name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val mood = newPlaylistMood.trim()
+                        if (mood.isNotEmpty()) {
+                            onCreatePlaylist(mood)
+                            showCreateDialog = false
+                            newPlaylistMood = ""
+                        }
+                    },
+                    enabled = newPlaylistMood.isNotBlank()
+                ) {
+                    Text("Create")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showCreateDialog = false
+                        newPlaylistMood = ""
+                    }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
     Box(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-        // Decorative triangle accent at top right
+        // Decorative triangle accent at top right - keeps its own purple/green identity, just
+        // blended toward the wallpaper's primary color when Material You dynamic color is
+        // available (LocalWallpaperAccent is null otherwise, so this is a no-op fallback to the
+        // original fixed colors on devices/OS versions without dynamic color).
+        val wallpaperAccent = LocalWallpaperAccent.current
         Box(
             modifier = Modifier
                 .align(Alignment.TopEnd)
@@ -293,19 +371,22 @@ fun PlaylistListScreen(
                 }
                 .background(
                     Brush.linearGradient(
-                        colors = listOf(Color(0xFF7B61FF), Color(0xFF1DB954))
+                        colors = listOf(
+                            wallpaperAccent?.let { lerp(Color(0xFF7B61FF), it, 0.35f) } ?: Color(0xFF7B61FF),
+                            wallpaperAccent?.let { lerp(Color(0xFF1DB954), it, 0.35f) } ?: Color(0xFF1DB954)
+                        )
                     )
                 )
         )
 
         LazyVerticalGrid(
-            columns = GridCells.Fixed(3),
+            columns = GridCells.Fixed(gridColumns),
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 24.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            item(span = { GridItemSpan(3) }) {
+            item(span = { GridItemSpan(gridColumns) }) {
                 Column(modifier = Modifier.padding(bottom = 24.dp)) {
                     Text(
                         text = "Trending Now",
@@ -382,7 +463,7 @@ fun PlaylistListScreen(
             }
 
             if (state.isLoadingPlaylists) {
-                item(span = { GridItemSpan(3) }) {
+                item(span = { GridItemSpan(gridColumns) }) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -393,7 +474,7 @@ fun PlaylistListScreen(
                     }
                 }
             } else if (state.playlists.isEmpty()) {
-                item(span = { GridItemSpan(3) }) {
+                item(span = { GridItemSpan(gridColumns) }) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -413,6 +494,17 @@ fun PlaylistListScreen(
                 }
             }
         }
+
+        FloatingActionButton(
+            onClick = { showCreateDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(24.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary
+        ) {
+            Icon(Icons.Default.Add, contentDescription = "Create new playlist")
+        }
     }
 }
 
@@ -423,13 +515,6 @@ fun PlaylistGridCard(
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
-    val gradient = Brush.linearGradient(
-        colors = listOf(
-            getMoodColor(playlist.mood),
-            getMoodColor(playlist.mood).copy(alpha = 0.5f)
-        )
-    )
-
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -443,8 +528,19 @@ fun PlaylistGridCard(
                 .aspectRatio(1f)
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(16.dp))
-                .background(gradient)
         ) {
+            Image(
+                painter = painterResource(id = com.fardeenkhan.moodtune.core.ui.R.drawable.music_disk),
+                contentDescription = null,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.25f))
+            )
+
             // Diagonal stripe decoration
             Box(
                 modifier = Modifier
@@ -555,7 +651,9 @@ fun MoodDetailScreen(
         }
     ) { paddingValues ->
         Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-            // Decorative triangle accent at top right
+            // Decorative triangle accent at top right - same wallpaper-blend treatment as the
+            // one on PlaylistListScreen (see comment there).
+            val wallpaperAccent = LocalWallpaperAccent.current
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
@@ -567,7 +665,10 @@ fun MoodDetailScreen(
                     }
                     .background(
                         Brush.linearGradient(
-                            colors = listOf(Color(0xFFFF5722), Color(0xFF7B61FF))
+                            colors = listOf(
+                                wallpaperAccent?.let { lerp(Color(0xFFFF5722), it, 0.35f) } ?: Color(0xFFFF5722),
+                                wallpaperAccent?.let { lerp(Color(0xFF7B61FF), it, 0.35f) } ?: Color(0xFF7B61FF)
+                            )
                         )
                     )
             )
@@ -834,7 +935,7 @@ fun SongListItem(
             )
         }
 
-        val songArtModel = song.localAlbumArtPath?.let { java.io.File(it) } ?: song.imageUrl
+        val songArtModel = song.albumArtModel()
         if (songArtModel != null) {
             AsyncImage(
                 model = songArtModel,
@@ -1057,119 +1158,6 @@ fun FileItem(file: DeviceFile, onToggle: () -> Unit) {
         }
     }
 }
-
-@Composable
-fun PlaylistHeader(
-    mood: String, 
-    songCount: Int, 
-    isReorderMode: Boolean,
-    isSaving: Boolean,
-    onBack: () -> Unit,
-    onReorderClick: () -> Unit
-) {
-    val color = getMoodColor(mood)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(350.dp)
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        color.copy(alpha = 0.5f),
-                        MaterialTheme.colorScheme.background
-                    )
-                )
-            )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(180.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(color)
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Mood: $mood",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
-            Text(
-                text = "$songCount songs",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-        
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .statusBarsPadding()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color.White)
-            }
-            
-            if (isSaving) {
-                CircularProgressIndicator(
-                    modifier = Modifier.padding(12.dp).size(24.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            } else {
-                IconButton(onClick = onReorderClick) {
-                    Icon(
-                        if (isReorderMode) Icons.Default.Check else Icons.Default.Reorder, 
-                        contentDescription = if (isReorderMode) "Done" else "Reorder", 
-                        tint = if (isReorderMode) MaterialTheme.colorScheme.primary else Color.White
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun PlaylistActions(onPlayClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = { }) {
-                Icon(Icons.Default.MoreVert, contentDescription = "More", tint = Color.White)
-            }
-        }
-        FloatingActionButton(
-            onClick = onPlayClick,
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            shape = RoundedCornerShape(50)
-        ) {
-            Icon(Icons.Default.PlayArrow, contentDescription = "Play")
-        }
-    }
-}
-
-val mockPlaylistSongs = listOf(
-    Song("1", "Starboy", "The Weeknd", "Energetic", null, null, "Upbeat", "High", SongExplanation("1", "", "", "")),
-    Song("2", "Blinding Lights", "The Weeknd", "Energetic", null, null, "Upbeat", "High", SongExplanation("2", "", "", "")),
-    Song("3", "Midnight City", "M83", "Energetic", null, null, "Dreamy", "High", SongExplanation("3", "", "", "")),
-    Song("4", "The Hills", "The Weeknd", "Energetic", null, null, "Dark", "Medium", SongExplanation("4", "", "", "")),
-    Song("5", "Save Your Tears", "The Weeknd", "Energetic", null, null, "Sad", "Medium", SongExplanation("5", "", "", ""))
-)
 
 @Preview
 @Composable

@@ -2,6 +2,7 @@ package com.fardeenkhan.moodtune.feature.home.ui
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
@@ -19,7 +20,8 @@ import java.util.UUID
 class HomeViewModel(
     private val generatePlaylistUseCase: GeneratePlaylistUseCase,
     private val playlistRepository: PlaylistRepository,
-    private val songsRepository: SongsRepository
+    private val songsRepository: SongsRepository,
+    private val musicPlayerManager: MusicPlayerManager
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(HomeState())
@@ -85,6 +87,9 @@ class HomeViewModel(
             is HomeIntent.RetryGeneration -> {
                 val mood = _state.value.lastAttemptedMood ?: return
                 generatePlaylist(mood)
+            }
+            is HomeIntent.PlaySong -> {
+                musicPlayerManager.playPlaylist(listOf(intent.song))
             }
         }
     }
@@ -188,20 +193,21 @@ data class HomeState(
 )
 
 sealed class HomeGenerationStatus {
-    object Idle : HomeGenerationStatus()
-    object Loading : HomeGenerationStatus()
-    object Success : HomeGenerationStatus()
-    object AlreadyCreated : HomeGenerationStatus()
+    data object Idle : HomeGenerationStatus()
+    data object Loading : HomeGenerationStatus()
+    data object Success : HomeGenerationStatus()
+    data object AlreadyCreated : HomeGenerationStatus()
     data class Error(val message: String) : HomeGenerationStatus()
 }
 
 sealed class HomeIntent {
     data class OnVibeInputChange(val newValue: String) : HomeIntent()
     data class RequestPlaylistGeneration(val mood: String? = null) : HomeIntent()
-    object ConfirmPlaylistGeneration : HomeIntent()
-    object CreateEmptyPlaylist : HomeIntent()
-    object DismissConfirmationDialog : HomeIntent()
+    data object ConfirmPlaylistGeneration : HomeIntent()
+    data object CreateEmptyPlaylist : HomeIntent()
+    data object DismissConfirmationDialog : HomeIntent()
     data class MarkPlaylistAsPlayed(val playlistId: String) : HomeIntent()
-    object ResetState : HomeIntent()
-    object RetryGeneration : HomeIntent()
+    data object ResetState : HomeIntent()
+    data object RetryGeneration : HomeIntent()
+    data class PlaySong(val song: Song) : HomeIntent()
 }

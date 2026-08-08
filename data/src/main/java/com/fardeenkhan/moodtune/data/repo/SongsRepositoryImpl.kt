@@ -60,8 +60,8 @@ class SongsRepositoryImpl(
         return Json.decodeFromString<List<LyricLine>>(json)
     }
 
-    override suspend fun generateLyrics(songId: String, title: String, artist: String, durationMs: Long): List<LyricLine> {
-        val lines = geminiAPIDataSource.getLyrics(title, artist, durationMs).map { LyricLine(it.ms, it.line) }
+    override suspend fun generateLyrics(songId: String, title: String, artist: String, durationMs: Long, movie: String?): List<LyricLine> {
+        val lines = geminiAPIDataSource.getLyrics(title, artist, durationMs, movie).map { LyricLine(it.ms, it.line) }
         songDao.updateLyrics(songId, Json.encodeToString(lines))
         return lines
     }
@@ -99,7 +99,6 @@ class SongsRepositoryImpl(
                     imageUrl = ytVideo?.snippet?.thumbnails?.medium?.url ?: ytVideo?.snippet?.thumbnails?.high?.url,
                     externalUrl = ytVideo?.id?.videoId?.let { "https://www.youtube.com/watch?v=$it" },
                     mood = mood,
-                    energy = null,
                     explanation = SongExplanation(
                         songId = songId,
                         about = recommended.about,

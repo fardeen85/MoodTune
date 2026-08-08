@@ -51,7 +51,10 @@ private val moodColorPalette = listOf(
     Color(0xFFFF9800)  // Orange
 )
 
+/** Deterministic color per mood string - same mood always maps to the same palette entry. */
 fun getMoodColor(mood: String): Color {
-    val index = Math.abs(mood.lowercase().hashCode()) % moodColorPalette.size
+    // Int.MIN_VALUE.mod(n) stays correct (Math.abs(Int.MIN_VALUE) would overflow back to
+    // negative and crash the array index below on that one specific hashCode).
+    val index = mood.lowercase().hashCode().mod(moodColorPalette.size)
     return moodColorPalette[index]
 }

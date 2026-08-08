@@ -33,4 +33,9 @@ dependencies {
     implementation(project(":core:database"))
     implementation(libs.kotlinx.serialization.json)
 
-    }
+    // Needed directly (not just transitively via core:database) for MoodTuneDatabase.withTransaction
+    // in PlaylistRepositoryImpl - core:database declares Room as `implementation`, which isn't
+    // exposed to consumers.
+    implementation(libs.androidx.room.runtime)
+    implementation(libs.androidx.room.ktx)
+}

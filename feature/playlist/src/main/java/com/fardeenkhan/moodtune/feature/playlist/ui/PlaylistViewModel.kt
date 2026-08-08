@@ -4,29 +4,26 @@ import android.net.Uri
 import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import com.fardeenkhan.moodtune.domain.usecase.GetDeviceSongsUseCase
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import java.util.UUID
-import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.Job
-import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
-import java.net.URI
-import java.net.URL
 
 data class DeviceFile(
     val id: String,
@@ -123,6 +120,24 @@ class PlaylistViewModel(
                 viewModelScope.launch {
                     playlistRepository.savePlaylist(updatedPlaylist)
                 }
+            }
+            is PlaylistIntent.CreatePlaylist -> {
+                createPlaylist(intent.mood)
+            }
+        }
+    }
+
+    private fun createPlaylist(mood: String) {
+        viewModelScope.launch {
+            val existing = playlistRepository.getPlaylistByMood(mood)
+            if (existing == null) {
+                val newPlaylist = Playlist(
+                    id = UUID.randomUUID().toString(),
+                    mood = mood,
+                    songs = emptyList(),
+                    createdAt = System.currentTimeMillis()
+                )
+                playlistRepository.savePlaylist(newPlaylist)
             }
         }
     }
@@ -248,15 +263,16 @@ data class PlaylistState(
 sealed class PlaylistIntent {
     data class SelectPlaylist(val mood: String) : PlaylistIntent()
     data class MarkPlaylistAsPlayed(val playlistId: String) : PlaylistIntent()
-    object LoadDeviceSongs : PlaylistIntent()
+    data object LoadDeviceSongs : PlaylistIntent()
     data class ToggleFileSelection(val fileId: String) : PlaylistIntent()
     data class AddSelectedSongsToPlaylist(val mood: String) : PlaylistIntent()
     data class PlayPlaylist(val startIndex: Int = 0) : PlaylistIntent()
     data class ReorderSongs(val fromIndex: Int, val toIndex: Int) : PlaylistIntent()
-    object ToggleReorderMode : PlaylistIntent()
+    data object ToggleReorderMode : PlaylistIntent()
     data class StartDrag(val songId: String) : PlaylistIntent()
-    object EndDrag : PlaylistIntent()
+    data object EndDrag : PlaylistIntent()
     data class DeletePlaylist(val playlistId: String) : PlaylistIntent()
-    object ToggleShuffle : PlaylistIntent()
+    data object ToggleShuffle : PlaylistIntent()
     data class RemoveSong(val songId: String) : PlaylistIntent()
+    data class CreatePlaylist(val mood: String) : PlaylistIntent()
 }

@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.google.ksp)
     alias(libs.plugins.kotlin.serialization)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -76,6 +77,10 @@ dependencies {
     // Splash Screen
     implementation(libs.androidx.core.splashscreen)
 
+    // Media3 - widget's own MediaController connection (WidgetMediaConnection)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.common)
+
     // Material 3 Adaptive
     implementation(libs.androidx.compose.material3.adaptive)
     implementation(libs.androidx.compose.material3.adaptive.layout)
@@ -93,6 +98,7 @@ dependencies {
     implementation(project(":infrastructure"))
     implementation(project(":core:utils"))
     implementation(project(":core:network"))
+    implementation(project(":config"))
 
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))

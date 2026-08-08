@@ -11,8 +11,8 @@ class GeneratePlaylistUseCase(
     private val songsRepository: SongsRepository
 ) {
     sealed class Result {
-        object Success : Result()
-        object AlreadyExists : Result()
+        data object Success : Result()
+        data object AlreadyExists : Result()
         data class Error(val message: String) : Result()
     }
 
@@ -40,6 +40,10 @@ class GeneratePlaylistUseCase(
         } catch (e: UnknownHostException) {
             Result.Error("No internet connection. Check your network and try again.")
         } catch (e: Exception) {
+            // Matched by exception class *name* rather than catching e.g. Ktor's
+            // HttpRequestTimeoutException or OkHttp's SocketTimeoutException directly - domain
+            // shouldn't depend on infrastructure-layer networking libraries just to classify
+            // errors for a user-facing message.
             val message = when {
                 e.javaClass.simpleName.contains("Timeout", ignoreCase = true) ||
                 e.cause?.javaClass?.simpleName?.contains("Timeout", ignoreCase = true) == true ->

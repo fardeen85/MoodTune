@@ -1,1 +1,9 @@
 API_KEY.txt
+
+# Firebase config - currently a shared multi-app project file, not scoped to this app alone.
+# Needed locally for Remote Config (see config/RemoteConfigManager) but shouldn't be committed.
+app/google-services.json
+
+# Gradle's local build cache - previously only specific files inside it were ignored rather
+# than the directory itself, which let the rest of the 27MB cache slip in as untracked.
+.gradle/

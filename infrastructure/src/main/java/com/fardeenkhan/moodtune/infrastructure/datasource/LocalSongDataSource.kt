@@ -11,6 +11,14 @@ import com.fardeenkhan.moodtune.domain.model.SongExplanation
 import java.io.File
 import java.security.MessageDigest
 
+/**
+ * Scans the device's MediaStore for local audio files. Each scan also extracts any embedded
+ * album art to [artDir], keyed by an MD5 hash of the file path so repeat scans reuse the same
+ * cached JPEG instead of re-extracting on every call, and prunes art for files no longer present
+ * (see [deleteOrphanedArt]). [Song.imageUrl] is the MediaStore album-art `content://` URI, which
+ * can be stale or empty depending on when the store last indexed the file; [Song.localAlbumArtPath]
+ * is the more reliable source since it's decoded directly from the file's own embedded metadata.
+ */
 class LocalSongDataSource(private val context: Context) {
 
     private val artDir = File(context.filesDir, "album_art").also { it.mkdirs() }
@@ -60,7 +68,6 @@ class LocalSongDataSource(private val context: Context) {
                         imageUrl = albumArtUri.toString(),
                         externalUrl = path,
                         mood = null,
-                        energy = null,
                         explanation = SongExplanation(id, "Local file from device", "Unknown", "Local"),
                         localAlbumArtPath = localArtPath
                     )

@@ -3,6 +3,7 @@ package com.fardeenkhan.moodtune.domain.repo
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import kotlinx.coroutines.flow.Flow
 
+/** Persisted playlists (Room-backed). Flow-returning methods stay live-updated; suspend methods are one-shot reads/writes. */
 interface PlaylistRepository {
     fun getPlaylists(): Flow<List<Playlist>>
     fun getRecentlyPlayedPlaylists(): Flow<List<Playlist>>

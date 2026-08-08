@@ -5,6 +5,11 @@ import com.fardeenkhan.moodtune.core.database.entity.SongExplanationEntity
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
 
+/**
+ * [lyrics] isn't part of the [Song] domain model (it's fetched/cached lazily), so this always
+ * maps to null - callers re-inserting an existing song must `.copy(lyrics = ...)` the result
+ * with the previously cached value first, or a re-save silently wipes cached lyrics.
+ */
 fun Song.toEntity(): SongEntity {
     return SongEntity(
         id = id,
@@ -14,7 +19,6 @@ fun Song.toEntity(): SongEntity {
         imageUrl = imageUrl,
         externalUrl = externalUrl,
         mood = mood,
-        energy = energy,
         explanation = explanation.toEntity(),
         durationMs = durationMs,
         lyrics = null,
@@ -39,7 +43,6 @@ fun SongEntity.toDomain(): Song {
         imageUrl = imageUrl,
         externalUrl = externalUrl,
         mood = mood,
-        energy = energy,
         explanation = explanation.toDomain(id),
         durationMs = durationMs,
         localAlbumArtPath = localAlbumArtPath

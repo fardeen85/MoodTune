@@ -13,10 +13,12 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PageSize
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.foundation.Canvas
+import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.window.core.layout.WindowWidthSizeClass
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -30,39 +32,35 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
 import coil3.compose.AsyncImage
 import com.fardeenkhan.moodtune.core.ui.components.NowPlayingIndicator
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
-import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel2
 import com.fardeenkhan.moodtune.core.ui.theme.getMoodColor
+import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
-import com.fardeenkhan.moodtune.domain.model.SongExplanation
-import androidx.compose.ui.geometry.Offset
 import kotlin.math.absoluteValue
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
-import kotlin.collections.isNotEmpty
 
 @Composable
 fun HomeScreenRoot(
     onNavigateToPlaylist: (String) -> Unit,
     isPlaying: Boolean = false,
-    onNowPlayingClick: () -> Unit = {}
+    onNowPlayingClick: () -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onNavigateToAllSongs: () -> Unit = {}
 ) {
     val viewModel: HomeViewModel = koinViewModel()
-    HomeScreen(viewModel, onNavigateToPlaylist, isPlaying, onNowPlayingClick)
+    HomeScreen(viewModel, onNavigateToPlaylist, isPlaying, onNowPlayingClick, onSearchClick, onNavigateToAllSongs)
 }
 
 @Composable
@@ -70,7 +68,9 @@ fun HomeScreen(
     viewModel: HomeViewModel,
     onNavigateToPlaylist: (String) -> Unit,
     isPlaying: Boolean = false,
-    onNowPlayingClick: () -> Unit = {}
+    onNowPlayingClick: () -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onNavigateToAllSongs: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsState()
 
@@ -79,7 +79,9 @@ fun HomeScreen(
         onIntent = viewModel::onIntent,
         onNavigateToPlaylist = onNavigateToPlaylist,
         isPlaying = isPlaying,
-        onNowPlayingClick = onNowPlayingClick
+        onNowPlayingClick = onNowPlayingClick,
+        onSearchClick = onSearchClick,
+        onNavigateToAllSongs = onNavigateToAllSongs
     )
 }
 
@@ -89,45 +91,54 @@ fun HomeScreen(
     onIntent: (HomeIntent) -> Unit,
     onNavigateToPlaylist: (String) -> Unit,
     isPlaying: Boolean = false,
-    onNowPlayingClick: () -> Unit = {}
+    onNowPlayingClick: () -> Unit = {},
+    onSearchClick: () -> Unit = {},
+    onNavigateToAllSongs: () -> Unit = {}
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
-    var showVibeGenerator by remember { mutableStateOf(false) }
 
-    // Vibe Generator Dialog (retrains generation feature in search icon)
-    if (showVibeGenerator) {
+    var showMoodInputDialog by remember { mutableStateOf(false) }
+    var moodInput by remember { mutableStateOf("") }
+
+    if (showMoodInputDialog) {
         AlertDialog(
-            onDismissRequest = { showVibeGenerator = false },
-            title = { Text("Generate a Vibe Playlist") },
+            onDismissRequest = {
+                showMoodInputDialog = false
+                moodInput = ""
+            },
+            title = { Text("New Playlist") },
             text = {
-                Column {
-                    Text("Describe how you are feeling to let AI curate the perfect music list.", style = MaterialTheme.typography.bodyMedium)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = state.vibeInput,
-                        onValueChange = { onIntent(HomeIntent.OnVibeInputChange(it)) },
-                        placeholder = { Text("e.g. Night driving, chill beats") },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        singleLine = true
-                    )
-                }
+                OutlinedTextField(
+                    value = moodInput,
+                    onValueChange = { moodInput = it },
+                    label = { Text("Describe your mood") },
+                    placeholder = { Text("e.g. late-night drive in the rain") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
             },
             confirmButton = {
-                Button(
+                TextButton(
                     onClick = {
-                        showVibeGenerator = false
-                        onIntent(HomeIntent.RequestPlaylistGeneration())
+                        val mood = moodInput.trim()
+                        if (mood.isNotEmpty()) {
+                            onIntent(HomeIntent.RequestPlaylistGeneration(mood))
+                            showMoodInputDialog = false
+                            moodInput = ""
+                        }
                     },
-                    enabled = state.vibeInput.isNotBlank()
+                    enabled = moodInput.isNotBlank()
                 ) {
-                    Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Generate")
+                    Text("Next")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showVibeGenerator = false }) {
+                TextButton(
+                    onClick = {
+                        showMoodInputDialog = false
+                        moodInput = ""
+                    }
+                ) {
                     Text("Cancel")
                 }
             }
@@ -138,45 +149,17 @@ fun HomeScreen(
         AlertDialog(
             onDismissRequest = { onIntent(HomeIntent.DismissConfirmationDialog) },
             title = { Text("Create Playlist") },
-            text = { 
-                Column {
-                    Text("How would you like to create a playlist for \"${state.pendingMood}\"?")
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "AI Generation: We'll find the perfect songs for your mood.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+            text = { Text("Create a playlist for \"${state.pendingMood}\"?") },
+            confirmButton = {
+                Button(onClick = { onIntent(HomeIntent.CreateEmptyPlaylist) }) {
+                    Icon(Icons.Default.Add, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("Create")
                 }
             },
-            confirmButton = {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Button(
-                        onClick = { onIntent(HomeIntent.ConfirmPlaylistGeneration) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.AutoAwesome, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Generate by AI")
-                    }
-
-                    OutlinedButton(
-                        onClick = { onIntent(HomeIntent.CreateEmptyPlaylist) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(8.dp))
-                        Text("Create Empty (Offline)")
-                    }
-                    TextButton(
-                        onClick = { onIntent(HomeIntent.DismissConfirmationDialog) },
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Cancel")
-                    }
+            dismissButton = {
+                TextButton(onClick = { onIntent(HomeIntent.DismissConfirmationDialog) }) {
+                    Text("Cancel")
                 }
             }
         )
@@ -220,7 +203,7 @@ fun HomeScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             HomeTopBar(
-                onSearchClick = { showVibeGenerator = true },
+                onSearchClick = onSearchClick,
                 isPlaying = isPlaying,
                 onNowPlayingClick = onNowPlayingClick
             )
@@ -235,69 +218,53 @@ fun HomeScreen(
                 contentPadding = PaddingValues(bottom = 24.dp),
                 verticalArrangement = Arrangement.spacedBy(32.dp)
             ) {
-                // 1. Featured Carousel section (representing most played playlists)
+                // 1. Featured Carousel — most played songs, ranked by play count (highest first)
                 item {
-                    val carouselPlaylists = if (state.mostPlayedPlaylists.isNotEmpty()) {
-                        state.mostPlayedPlaylists
+                    val carouselSongs = if (state.mostPlayedSongs.isNotEmpty()) {
+                        state.mostPlayedSongs
                     } else if (state.recentlyPlayedPlaylists.isNotEmpty()) {
-                        state.recentlyPlayedPlaylists
+                        state.recentlyPlayedPlaylists.mapNotNull { it.songs.firstOrNull() }
                     } else {
-                        // Fallback dummy playlists so it is never empty and looks good immediately
-                        listOf(
-                            Playlist("dummy_1", "Reggae & Chill", listOf(Song("1", "Is This The Right Way?", "Beres Hammond", "", null, null, null, null, SongExplanation("", "", "", ""))), 0),
-                            Playlist("dummy_2", "Slow Motion", listOf(Song("2", "Slow Motion", "Wackies", "", null, null, null, null, SongExplanation("", "", "", ""))), 0),
-                            Playlist("dummy_3", "Gym Time Again", listOf(Song("3", "Pump It Up", "Gym Vibe", "", null, null, null, null, SongExplanation("", "", "", ""))), 0)
-                        )
+                        emptyList()
                     }
 
-                    FeaturedCarousel(
-                        playlists = carouselPlaylists,
-                        onPlaylistClick = { playlist ->
-                            if (!playlist.id.startsWith("dummy_")) {
-                                onIntent(HomeIntent.MarkPlaylistAsPlayed(playlist.id))
-                                onNavigateToPlaylist(playlist.mood)
-                            } else {
-                                // Trigger empty/mock generation for first play
-                                onIntent(HomeIntent.RequestPlaylistGeneration(playlist.mood))
+                    if (carouselSongs.isNotEmpty()) {
+                        FeaturedCarousel(
+                            songs = carouselSongs,
+                            onSongClick = { song ->
+                                onIntent(HomeIntent.PlaySong(song))
+                                onNowPlayingClick()
                             }
-                        }
-                    )
+                        )
+                    } else {
+                        FeaturedCarouselEmptyState()
+                    }
                 }
 
                 // 2. Playlists for You section
                 item {
                     PlaylistsForYouSection(
-                        playlists = state.allPlaylists.ifEmpty {
-                            listOf(
-                                Playlist("dummy_1", "Reggae and Chill", emptyList(), 0),
-                                Playlist("dummy_2", "Slow Motion", emptyList(), 0),
-                                Playlist("dummy_3", "Gym Time Again", emptyList(), 0),
-                                Playlist("dummy_4", "Party Dance", emptyList(), 0)
-                            )
-                        },
+                        playlists = state.allPlaylists,
                         onPlaylistClick = { playlist ->
-                            if (!playlist.id.startsWith("dummy_")) {
-                                onIntent(HomeIntent.MarkPlaylistAsPlayed(playlist.id))
-                                onNavigateToPlaylist(playlist.mood)
-                            } else {
-                                onIntent(HomeIntent.RequestPlaylistGeneration(playlist.mood))
-                            }
-                        }
+                            onIntent(HomeIntent.MarkPlaylistAsPlayed(playlist.id))
+                            onNavigateToPlaylist(playlist.mood)
+                        },
+                        onCreateClick = { showMoodInputDialog = true }
                     )
                 }
 
                 // 3. In the Mix section
                 item {
-                    InTheMixSection(
-                        songs = state.mostPlayedSongs.ifEmpty {
-                            listOf(
-                                Song("mix_1", "Wack We A Wack", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", "")),
-                                Song("mix_2", "Major Lazer", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", "")),
-                                Song("mix_3", "Doh Wanna Go Bad", "Chris Gayle", "", null, null, null, null, SongExplanation("", "", "", ""))
-                            )
-                        },
-                        onSongClick = { /* Can play via MusicPlayerManager or navigate to details */ }
-                    )
+                    if (state.mostPlayedSongs.isNotEmpty()) {
+                        InTheMixSection(
+                            songs = state.mostPlayedSongs,
+                            onSongClick = { song ->
+                                onIntent(HomeIntent.PlaySong(song))
+                                onNowPlayingClick()
+                            },
+                            onSeeAllClick = onNavigateToAllSongs
+                        )
+                    }
                 }
             }
 
@@ -374,23 +341,38 @@ fun HomeTopBar(
 
 @Composable
 fun FeaturedCarousel(
-    playlists: List<Playlist>,
-    onPlaylistClick: (Playlist) -> Unit
+    songs: List<Song>,
+    onSongClick: (Song) -> Unit
 ) {
-    val pagerState = rememberPagerState(pageCount = { playlists.size })
+    val pagerState = rememberPagerState(pageCount = { songs.size })
 
+    val rankLabels = listOf("#1 Most Played", "#2 Most Played", "#3 Most Played")
+
+    // On landscape phones and unfolded/large foldables the window is much wider than it is
+    // tall, so a full-width pager page would stretch the card art far beyond a sensible size.
+    // Cap the card to a fixed width there instead of letting it fill the available width.
+    val widthSizeClass = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass
+    val isCompactWidth = widthSizeClass == WindowWidthSizeClass.COMPACT
+
+    val cardHeight = if (isCompactWidth) 220.dp else 180.dp
+    val pageSize = if (isCompactWidth) PageSize.Fill else PageSize.Fixed(260.dp)
+    val pagerContentPadding = if (isCompactWidth) {
+        PaddingValues(start = 24.dp, end = 64.dp)
+    } else {
+        PaddingValues(horizontal = 24.dp)
+    }
 
     HorizontalPager(
         state = pagerState,
-        contentPadding = PaddingValues(start = 24.dp, end = 64.dp),
+        pageSize = pageSize,
+        contentPadding = pagerContentPadding,
         pageSpacing = 12.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
+            .height(cardHeight)
     ) { page ->
-        val playlist = playlists[page]
-        val moodColor = getMoodColor(playlist.mood)
-        val song = playlist.songs.firstOrNull()
+        val song = songs[page]
+        val moodColor = getMoodColor(song.mood ?: "")
 
         Box(
             modifier = Modifier
@@ -403,12 +385,12 @@ fun FeaturedCarousel(
                     scaleY = lerp(start = 0.85f, stop = 1f, fraction = 1f - pageOffset.coerceIn(0f, 1f))
                 }
         ) {
-            val cardArtModel = song?.localAlbumArtPath?.let { java.io.File(it) } ?: song?.imageUrl
+            val cardArtModel = song.albumArtModel()
             Card(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = 20.dp)
-                    .clickable { onPlaylistClick(playlist) },
+                    .clickable { onSongClick(song) },
                 shape = RoundedCornerShape(24.dp),
                 colors = CardDefaults.cardColors(containerColor = moodColor)
             ) {
@@ -439,19 +421,28 @@ fun FeaturedCarousel(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(24.dp)
-                            .padding(end = 80.dp),
+                            .padding(if (isCompactWidth) 24.dp else 16.dp)
+                            .padding(end = if (isCompactWidth) 80.dp else 64.dp),
                         verticalArrangement = Arrangement.Center
                     ) {
+                        if (page < rankLabels.size) {
+                            Text(
+                                text = rankLabels[page],
+                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                color = Color(0xFFF5C518)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                        }
                         Text(
-                            text = song?.artist ?: "Curated Playlist",
+                            text = song.artist,
                             style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                             color = Color.White.copy(alpha = 0.9f)
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = song?.title ?: playlist.mood,
-                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            text = song.title,
+                            style = (if (isCompactWidth) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge)
+                                .copy(fontWeight = FontWeight.ExtraBold),
                             color = Color.White,
                             maxLines = 2
                         )
@@ -462,10 +453,10 @@ fun FeaturedCarousel(
                         modifier = Modifier
                             .align(Alignment.BottomEnd)
                             .padding(bottom = 14.dp, end = 14.dp)
-                            .size(52.dp)
+                            .size(if (isCompactWidth) 52.dp else 44.dp)
                             .clip(MaterialShapes.Cookie7Sided.toShape())
                             .background(Color(0xFFF5C518))
-                            .clickable { onPlaylistClick(playlist) },
+                            .clickable { onSongClick(song) },
                         contentAlignment = Alignment.Center
                     ) {
 
@@ -473,19 +464,20 @@ fun FeaturedCarousel(
                             Icons.Default.PlayArrow,
                             contentDescription = "Play",
                             tint = Color(0xFF5D3A1A),
-                            modifier = Modifier.size(26.dp)
+                            modifier = Modifier.size(if (isCompactWidth) 26.dp else 22.dp)
                         )
                     }
                 }
             }
 
             // Floating album art at top-right, partially overflows above card
+            val floatingArtSize = if (isCompactWidth) 100.dp else 76.dp
             if (cardArtModel != null) {
                 AsyncImage(
                     model = cardArtModel,
-                    contentDescription = "${song?.title} album art",
+                    contentDescription = "${song.title} album art",
                     modifier = Modifier
-                        .size(100.dp)
+                        .size(floatingArtSize)
                         .align(Alignment.TopEnd)
                         .padding(end = 16.dp)
                         .clip(RoundedCornerShape(16.dp)),
@@ -494,7 +486,7 @@ fun FeaturedCarousel(
             } else {
                 Box(
                     modifier = Modifier
-                        .size(90.dp)
+                        .size(floatingArtSize - 10.dp)
                         .align(Alignment.TopEnd)
                         .padding(end = 16.dp)
                         .clip(RoundedCornerShape(16.dp))
@@ -505,7 +497,7 @@ fun FeaturedCarousel(
                         Icons.Default.MusicNote,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(if (isCompactWidth) 36.dp else 28.dp)
                     )
                 }
             }
@@ -514,9 +506,73 @@ fun FeaturedCarousel(
 }
 
 @Composable
+fun FeaturedCarouselEmptyState() {
+    val widthSizeClass = currentWindowAdaptiveInfo().windowSizeClass.windowWidthSizeClass
+    val isCompactWidth = widthSizeClass == WindowWidthSizeClass.COMPACT
+    val cardHeight = if (isCompactWidth) 220.dp else 180.dp
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp)
+            .height(cardHeight)
+            .clip(RoundedCornerShape(24.dp))
+    ) {
+        // Same album-art-backed card treatment as a real FeaturedCarousel song, so the
+        // placeholder reads as "a song card" rather than a generic empty box.
+        Image(
+            painter = painterResource(id = com.fardeenkhan.moodtune.core.ui.R.drawable.music_placeholder),
+            contentDescription = null,
+            modifier = Modifier.fillMaxSize(),
+            contentScale = ContentScale.Crop
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Black.copy(alpha = 0.35f),
+                            Color.Black.copy(alpha = 0.75f)
+                        )
+                    )
+                )
+        )
+        Column(
+            modifier = Modifier
+                .align(Alignment.Center)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Icon(
+                Icons.Default.MusicNote,
+                contentDescription = null,
+                tint = Color.White,
+                modifier = Modifier.size(32.dp)
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Your most played songs will appear here",
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                color = Color.White,
+                textAlign = TextAlign.Center
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Play some music to start building your mix",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+@Composable
 fun PlaylistsForYouSection(
     playlists: List<Playlist>,
-    onPlaylistClick: (Playlist) -> Unit
+    onPlaylistClick: (Playlist) -> Unit,
+    onCreateClick: () -> Unit
 ) {
     Column {
         Text(
@@ -526,18 +582,35 @@ fun PlaylistsForYouSection(
             modifier = Modifier.padding(top = 24.dp,start = 24.dp,end=24.dp, bottom = 16.dp)
         )
 
+        if (playlists.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp)
+                    .height(96.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(16.dp))
+                    .clickable { onCreateClick() },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Create your first playlist",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White
+                    )
+                }
+            }
+            return@Column
+        }
+
         LazyRow(
             contentPadding = PaddingValues(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             items(playlists) { playlist ->
-                val gradient = Brush.linearGradient(
-                    colors = listOf(
-                        getMoodColor(playlist.mood),
-                        getMoodColor(playlist.mood).copy(alpha = 0.5f)
-                    )
-                )
-
                 Column(
                     modifier = Modifier
                         .width(120.dp)
@@ -547,8 +620,19 @@ fun PlaylistsForYouSection(
                         modifier = Modifier
                             .size(120.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(gradient)
                     ) {
+                        Image(
+                            painter = painterResource(id = com.fardeenkhan.moodtune.core.ui.R.drawable.music_disk),
+                            contentDescription = null,
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black.copy(alpha = 0.25f))
+                        )
+
                         // Diagonal stripe decoration
                         Box(
                             modifier = Modifier
@@ -606,7 +690,8 @@ fun PlaylistsForYouSection(
 @Composable
 fun InTheMixSection(
     songs: List<Song>,
-    onSongClick: (Song) -> Unit
+    onSongClick: (Song) -> Unit,
+    onSeeAllClick: () -> Unit = {}
 ) {
     Column {
         Row(
@@ -621,12 +706,12 @@ fun InTheMixSection(
                 style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                 color = Color.White
             )
-            
+
             Text(
                 text = "See All",
                 style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
                 color = Color(0xFFFF5722), // Orange/red See All link
-                modifier = Modifier.clickable { /* Handle See All */ }
+                modifier = Modifier.clickable { onSeeAllClick() }
             )
         }
 
@@ -640,7 +725,7 @@ fun InTheMixSection(
                         .width(130.dp)
                         .clickable { onSongClick(song) }
                 ) {
-                    val mixArtModel = song.localAlbumArtPath?.let { java.io.File(it) } ?: song.imageUrl
+                    val mixArtModel = song.albumArtModel()
                     if (mixArtModel != null) {
                         AsyncImage(
                             model = mixArtModel,
@@ -687,12 +772,6 @@ fun InTheMixSection(
         }
     }
 }
-
-val mockSongs = listOf(
-    Song("1", "Midnight City", "M83", "Vibe", null, null, "Dreamy", "High", SongExplanation("1", "", "", "")),
-    Song("2", "Starboy", "The Weeknd", "Vibe", null, null, "Dark", "High", SongExplanation("2", "", "", "")),
-    Song("3", "Blinding Lights", "The Weeknd", "Vibe", null, null, "Upbeat", "High", SongExplanation("3", "", "", ""))
-)
 
 @Preview
 @Composable

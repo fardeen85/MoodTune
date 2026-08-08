@@ -28,11 +28,6 @@ dependencies {
     implementation(platform(libs.koin.bom))
     implementation(libs.koin.androidx.compose)
 
-
-    // DI - Koin
-    implementation(platform(libs.koin.bom))
-    implementation(libs.koin.androidx.compose)
-
     // Network - Ktor
     implementation(libs.ktor.client.core)
     implementation(libs.ktor.client.okhttp)

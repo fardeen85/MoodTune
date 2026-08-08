@@ -4,15 +4,26 @@ import androidx.compose.foundation.lazy.LazyListItemInfo
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 
-import androidx.compose.runtime.State
-import androidx.compose.runtime.rememberUpdatedState
-
+/**
+ * Long-press-drag-to-reorder for a [LazyColumn][androidx.compose.foundation.lazy.LazyColumn].
+ * Tracks the dragged item purely by its stable key ([draggedItemId]) rather than its list index,
+ * so it keeps following the same logical item across reorders even as the underlying data (and
+ * therefore each item's index) shifts mid-drag.
+ *
+ * [onDrag] compares the dragged item's current on-screen position against every other *visible*
+ * item's bounds; once it has been dragged past another item's midpoint-ish overlap threshold,
+ * [onMoveState] is invoked to swap them in the backing data, and the drag's reference point
+ * ("initiallyDraggedElement") is rebased to the item it just swapped with so the running
+ * [dragdistance] stays relative to the new position instead of compounding drift.
+ */
 class DragDropListState(
     private val listState: LazyListState,
     private val onMoveState: State<(Int, Int) -> Unit>
@@ -88,25 +99,11 @@ class DragDropListState(
             .firstOrNull { it.key == draggedItemId } ?: return 0f
         return original + dragdistance - currentItemInfo.offset
     }
-
-
-    private fun LazyListState.findIteminfo(index: Int): LazyListItemInfo?{
-        val draggedItem = layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
-        return if (draggedItem != null) draggedItem else null
-    }
 }
 
-private fun LazyListItemInfo.overlaps(top:Int,bottom: Int): Boolean
-{
-    return offset< bottom && (offset + size)> top
-
-
+private fun LazyListItemInfo.overlaps(top: Int, bottom: Int): Boolean {
+    return offset < bottom && (offset + size) > top
 }
-
-data class Item(
-    val id: Int,
-    val name: String
-)
 
 @Composable
 fun rememberDragDropListState(

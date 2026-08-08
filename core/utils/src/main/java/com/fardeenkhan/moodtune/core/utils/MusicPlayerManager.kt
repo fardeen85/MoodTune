@@ -2,29 +2,39 @@ package com.fardeenkhan.moodtune.core.utils
 
 import android.content.ComponentName
 import android.content.Context
+import android.net.Uri
+import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
-import android.net.Uri
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
+import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-import kotlinx.coroutines.SupervisorJob
+private const val TAG = "MusicPlayerManager"
 
-import com.fardeenkhan.moodtune.domain.repo.SongsRepository
-
+/**
+ * App-wide wrapper around a [MediaController] connected to `MediaPlaybackService`
+ * (infrastructure module). Owns the single source of truth for playback UI state
+ * ([playbackState]) and the currently loaded queue ([currentQueue]).
+ *
+ * core/utils cannot depend on the infrastructure module (that would create a dependency
+ * cycle, since infrastructure depends on core/utils), so the service is targeted by its
+ * fully-qualified class name string in [SessionToken] rather than `MediaPlaybackService::class`.
+ */
 class MusicPlayerManager(
     context: Context,
     private val songsRepository: SongsRepository
@@ -51,7 +61,7 @@ class MusicPlayerManager(
                 mediaController = controllerFuture?.get()
                 setupController()
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e(TAG, "Failed to connect MediaController", e)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -70,7 +80,7 @@ class MusicPlayerManager(
                         try {
                             songsRepository.incrementSongPlayCount(songId)
                         } catch (e: Exception) {
-                            e.printStackTrace()
+                            Log.e(TAG, "Failed to increment play count for $songId", e)
                         }
                     }
                 }
@@ -101,7 +111,6 @@ class MusicPlayerManager(
                     imageUrl = item.mediaMetadata.artworkUri?.toString(),
                     externalUrl = item.localConfiguration?.uri?.toString(),
                     mood = null,
-                    energy = null,
                     explanation = SongExplanation(item.mediaId, "", "", "")
                 )
             },
@@ -115,6 +124,7 @@ class MusicPlayerManager(
         )
     }
 
+    /** Polls [updateState] every second so [playbackState].progress advances during playback. */
     private fun startProgressUpdate() {
         progressJob?.cancel()
         progressJob = scope.launch {
@@ -134,6 +144,10 @@ class MusicPlayerManager(
         currentPlaylistSongs = songs
         _currentQueue.value = songs
         val mediaItems = songs.map { song ->
+            // Locally embedded album art (extracted once, cached on disk) takes priority over
+            // the remote imageUrl so on-device songs render art without a network round-trip.
+            val artworkUri = song.localAlbumArtPath?.let { Uri.parse("file://$it") }
+                ?: song.imageUrl?.let { Uri.parse(it) }
             MediaItem.Builder()
                 .setMediaId(song.id)
                 .setUri(Uri.parse(song.externalUrl ?: ""))
@@ -141,7 +155,7 @@ class MusicPlayerManager(
                     MediaMetadata.Builder()
                         .setTitle(song.title)
                         .setArtist(song.artist)
-                        .setArtworkUri(song.imageUrl?.let { Uri.parse(it) })
+                        .setArtworkUri(artworkUri)
                         .build()
                 )
                 .build()

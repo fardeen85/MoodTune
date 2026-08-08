@@ -14,7 +14,6 @@ data class SongEntity(
     val imageUrl: String?,
     val externalUrl: String?,
     val mood: String?,
-    val energy: String?,
     @Embedded(prefix = "explanation_")
     val explanation: SongExplanationEntity,
     val playCount: Int = 0,

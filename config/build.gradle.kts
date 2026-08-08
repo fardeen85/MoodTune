@@ -28,4 +28,16 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+
+    // Firebase Remote Config
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.config)
+    implementation(libs.kotlinx.coroutines.play.services)
+
+    // DataStore
+    implementation(libs.androidx.datastore.preferences)
+
+    // DI - Koin
+    implementation(platform(libs.koin.bom))
+    implementation(libs.koin.androidx.compose)
 }
