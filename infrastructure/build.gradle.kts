@@ -32,6 +32,7 @@ dependencies {
 
     implementation(project(":domain"))
     implementation(project(":config"))
+    implementation(project(":core:utils"))
 
     implementation(libs.androidx.media3.exoplayer)
     implementation(libs.androidx.media3.session)
@@ -50,4 +51,12 @@ dependencies {
 
     //serialization
     implementation(libs.kotlinx.serialization.json)
+
+    // DataStore - persisted playback snapshot for MediaPlaybackService restoration
+    implementation(libs.androidx.datastore.preferences)
+
+    // DI - Koin (MediaPlaybackService injects its repository/use-case deps directly, like any
+    // other Android component in this app's Koin graph)
+    implementation(platform(libs.koin.bom))
+    implementation(libs.koin.android)
 }

@@ -3,6 +3,7 @@ package com.fardeenkhan.moodtune.feature.playlist.ui
 
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.adaptive.currentWindowAdaptiveInfo
+import androidx.compose.ui.text.style.TextAlign
 import androidx.window.core.layout.WindowWidthSizeClass
 
 import androidx.compose.ui.draganddrop.toAndroidDragEvent
@@ -75,7 +76,12 @@ import com.fardeenkhan.moodtune.core.ui.components.NowPlayingIndicator
 import com.fardeenkhan.moodtune.core.ui.theme.LocalWallpaperAccent
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
+import androidx.compose.animation.Crossfade
+import com.fardeenkhan.moodtune.core.ui.util.LoadStateShape
 import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
+import com.fardeenkhan.moodtune.core.ui.util.rememberDelayedLoadingVisible
+import com.fardeenkhan.moodtune.core.ui.util.shape
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.feature.playlist.ui.components.rememberDragDropListState
@@ -276,6 +282,11 @@ fun PlaylistListScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var newPlaylistMood by remember { mutableStateOf("") }
 
+    // Local Room-backed reads usually resolve in a handful of milliseconds; showing the
+    // spinner immediately would flash it for a single frame, reading as a stuck/dropped frame
+    // rather than smooth motion - see rememberDelayedLoadingVisible.
+    val showPlaylistsLoader = rememberDelayedLoadingVisible(state.isLoadingPlaylists)
+
     // Landscape phones and unfolded/large foldables give the grid a lot more width; a fixed
     // 3-column grid would stretch each square album folder to a huge size, so add columns
     // as the window widens instead of growing each cell.
@@ -388,12 +399,6 @@ fun PlaylistListScreen(
         ) {
             item(span = { GridItemSpan(gridColumns) }) {
                 Column(modifier = Modifier.padding(bottom = 24.dp)) {
-                    Text(
-                        text = "Trending Now",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = Color.Gray
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -407,13 +412,15 @@ fun PlaylistListScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Caziq Music • ${state.playlists.size} playlists",
+                                text = "${state.playlists.size} playlists",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
                         }
 
-                        // Right-aligned play and shuffle buttons
+                        // Right-aligned play button. The 3-dot "more options" and shuffle
+                        // buttons that used to sit here were never wired to anything real
+                        // (dead taps) - removed rather than left as decoration.
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -422,25 +429,6 @@ fun PlaylistListScreen(
                                 isPlaying = isPlaying,
                                 onClick = onNowPlayingClick
                             )
-                            // 3-dot options button
-                            IconButton(
-                                onClick = { /* Placeholder — no action yet */ },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "More options", tint = Color.White)
-                            }
-
-                            // Shuffle Button (grey circular)
-                            Box(
-                                modifier = Modifier
-                                    .size(48.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.1f))
-                                    .clickable { /* Shuffle action */ },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(Icons.Default.Shuffle, contentDescription = "Shuffle", tint = Color.White)
-                            }
 
                             // Play Button (white circular)
                             Box(
@@ -463,20 +451,24 @@ fun PlaylistListScreen(
             }
 
             if (state.isLoadingPlaylists) {
-                item(span = { GridItemSpan(gridColumns) }) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        LoadingIndicator()
+                if (showPlaylistsLoader) {
+                    item(key = "loader", span = { GridItemSpan(gridColumns) }) {
+                        Box(
+                            modifier = Modifier
+                                .animateItem()
+                                .fillMaxWidth()
+                                .padding(48.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            LoadingIndicator()
+                        }
                     }
                 }
             } else if (state.playlists.isEmpty()) {
-                item(span = { GridItemSpan(gridColumns) }) {
+                item(key = "empty", span = { GridItemSpan(gridColumns) }) {
                     Box(
                         modifier = Modifier
+                            .animateItem()
                             .fillMaxWidth()
                             .padding(48.dp),
                         contentAlignment = Alignment.Center
@@ -485,11 +477,12 @@ fun PlaylistListScreen(
                     }
                 }
             } else {
-                items(state.playlists) { playlist ->
+                items(state.playlists, key = { it.id }) { playlist ->
                     PlaylistGridCard(
                         playlist = playlist,
                         onClick = { onMoodClick(playlist.mood) },
-                        onLongClick = { playlistToDelete = playlist }
+                        onLongClick = { playlistToDelete = playlist },
+                        modifier = Modifier.animateItem()
                     )
                 }
             }
@@ -511,12 +504,13 @@ fun PlaylistListScreen(
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun PlaylistGridCard(
-    playlist: Playlist, 
+    playlist: Playlist,
     onClick: () -> Unit,
-    onLongClick: () -> Unit
+    onLongClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .combinedClickable(
                 onClick = onClick,
@@ -617,6 +611,10 @@ fun MoodDetailScreen(
     onNowPlayingClick: () -> Unit = {}
 ) {
     val songs = state.currentPlaylist?.songs ?: emptyList()
+    // Local Room-backed reads usually resolve in a handful of milliseconds; showing the
+    // spinner immediately would flash it for a single frame, reading as a stuck/dropped frame
+    // rather than smooth motion - see rememberDelayedLoadingVisible.
+    val showCurrentPlaylistLoader = rememberDelayedLoadingVisible(state.isLoadingCurrentPlaylist)
     val lazyListState = rememberLazyListState()
     var songOptionsTarget by remember { mutableStateOf<Song?>(null) }
     val sheetState = rememberModalBottomSheetState()
@@ -724,13 +722,7 @@ fun MoodDetailScreen(
                         }
                         
                         Spacer(modifier = Modifier.height(16.dp))
-                        
-                        Text(
-                            text = "Trending Now",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.Gray
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
+
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -744,26 +736,16 @@ fun MoodDetailScreen(
                                 )
                                 Spacer(modifier = Modifier.height(4.dp))
                                 Text(
-                                    text = "Caziq Music • ${songs.size} songs",
+                                    text = "${songs.size} songs",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = Color.Gray
                                 )
                             }
 
-                            // Right-aligned buttons: Filter, Shuffle, Play
+                            // Right-aligned buttons: Shuffle, Play. The Filter button that used
+                            // to sit here was never wired to anything real (dead tap) - removed
+                            // rather than left as decoration.
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                // Filter Button (grey circular)
-                                Box(
-                                    modifier = Modifier
-                                        .size(44.dp)
-                                        .clip(CircleShape)
-                                        .background(Color.White.copy(alpha = 0.1f))
-                                        .clickable { /* Toggle filter/sort */ },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(Icons.Default.Tune, contentDescription = "Filter", tint = Color.White, modifier = Modifier.size(20.dp))
-                                }
-
                                 // Shuffle Button (grey circular)
                                 Box(
                                     modifier = Modifier
@@ -806,14 +788,16 @@ fun MoodDetailScreen(
                 }
 
                 if (state.isLoadingCurrentPlaylist && songs.isEmpty()) {
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
-                            LoadingIndicator()
+                    if (showCurrentPlaylistLoader) {
+                        item(key = "loader") {
+                            Box(modifier = Modifier.animateItem().fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                                LoadingIndicator()
+                            }
                         }
                     }
                 } else if (songs.isEmpty() && !state.isLoadingCurrentPlaylist) {
-                    item {
-                        Box(modifier = Modifier.fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
+                    item(key = "empty") {
+                        Box(modifier = Modifier.animateItem().fillMaxWidth().padding(48.dp), contentAlignment = Alignment.Center) {
                             Text(text = "No songs in this playlist", color = Color.Gray)
                         }
                     }
@@ -881,6 +865,33 @@ fun MoodDetailScreen(
                         }
                     }
                 )
+                HorizontalDivider()
+                ListItem(
+                    headlineContent = { Text("Repeat song") },
+                    supportingContent = { Text("Plays back-to-back before moving to the next song") },
+                    leadingContent = { Icon(Icons.Default.Repeat, contentDescription = null, tint = Color.White) }
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf(1, 2, 3).forEach { count ->
+                        val isSelected = targetSong.repeatCount == count
+                        FilterChip(
+                            selected = isSelected,
+                            onClick = {
+                                onIntent(PlaylistIntent.SetSongRepeatCount(targetSong.id, count))
+                                songOptionsTarget = targetSong.copy(repeatCount = count)
+                            },
+                            label = { Text(if (count == 1) "Off" else "${count}×") },
+                            leadingIcon = if (isSelected) {
+                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                            } else null
+                        )
+                    }
+                }
                 HorizontalDivider()
                 ListItem(
                     headlineContent = { Text("Remove from playlist") },
@@ -967,8 +978,11 @@ fun SongListItem(
                 maxLines = 1
             )
             Spacer(modifier = Modifier.height(2.dp))
+            // Device-file songs genuinely have no mood - showing a fabricated one (e.g. a
+            // hardcoded "Chill" fallback) here would misrepresent a song as AI-classified when
+            // it never was, so a null mood just means the subtitle is the artist alone.
             Text(
-                text = "${song.artist} • ${song.mood ?: "Chill"}",
+                text = song.mood?.let { "${song.artist} • $it" } ?: song.artist,
                 style = MaterialTheme.typography.bodySmall,
                 color = Color.Gray,
                 maxLines = 1
@@ -976,6 +990,22 @@ fun SongListItem(
         }
 
         Spacer(modifier = Modifier.width(8.dp))
+
+        if (song.repeatCount > 1) {
+            Icon(
+                Icons.Default.Repeat,
+                contentDescription = "Repeats ${song.repeatCount} times",
+                tint = Color(0xFF009688),
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(2.dp))
+            Text(
+                text = "${song.repeatCount}×",
+                style = MaterialTheme.typography.bodySmall,
+                color = Color(0xFF009688)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+        }
 
         Text(
             text = song.durationMs?.let { ms ->
@@ -1004,7 +1034,12 @@ fun DeviceFilesScreen(
     mood: String,
     onBack: () -> Unit
 ) {
-    val selectedCount = state.deviceFiles.count { it.isSelected }
+    val selectedCount = (state.deviceFilesState as? LoadState.Loaded)?.data.orEmpty().count { it.isSelected }
+    // See rememberDelayedLoadingVisible - avoids a single-frame spinner flash if the device
+    // scan happens to resolve almost instantly (e.g. very few files, warm MediaStore cache).
+    val showDeviceFilesLoader = rememberDelayedLoadingVisible(
+        state.deviceFilesState is LoadState.Idle || state.deviceFilesState is LoadState.Loading
+    )
 
     MusicPermissionScreen(
         onLoadMusic = {
@@ -1057,38 +1092,50 @@ fun DeviceFilesScreen(
             }
         }
     ) { paddingValues ->
-        LazyColumn(
+        // Crossfade, not a hard swap - the spinner fading into the actual file list (or vice
+        // versa) instead of one instantly replacing the other is what reads as "smooth". This
+        // LazyColumn has nothing else in it besides this branching, so the whole thing can be
+        // one Crossfade rather than juggling per-item keys inside a single shared list.
+        Crossfade(
+            targetState = state.deviceFilesState.shape { it.isEmpty() },
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            if (state.isLoadingDeviceSongs) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        LoadingIndicator()
+            label = "deviceFilesShape"
+        ) { currentShape ->
+            when (currentShape) {
+                LoadStateShape.LOADING -> {
+                    if (showDeviceFilesLoader) {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            LoadingIndicator()
+                        }
                     }
                 }
-            } else if (state.deviceFiles.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(48.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(text = "No audio files found on device", color = Color.Gray)
+                LoadStateShape.ERROR -> {
+                    val message = (state.deviceFilesState as? LoadState.Error)?.message.orEmpty()
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
                     }
                 }
-            } else {
-                items(state.deviceFiles) { file ->
-                    FileItem(file = file, onToggle = { onIntent(PlaylistIntent.ToggleFileSelection(file.id)) })
+                LoadStateShape.EMPTY -> {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(text = "Hmm, you don't have any songs on this device", color = Color.Gray)
+                    }
+                }
+                LoadStateShape.CONTENT -> {
+                    val files = (state.deviceFilesState as? LoadState.Loaded)?.data.orEmpty()
+                    LazyColumn(
+                        contentPadding = PaddingValues(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        items(files, key = { it.id }) { file ->
+                            FileItem(
+                                file = file,
+                                onToggle = { onIntent(PlaylistIntent.ToggleFileSelection(file.id)) },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1096,9 +1143,9 @@ fun DeviceFilesScreen(
 }
 
 @Composable
-fun FileItem(file: DeviceFile, onToggle: () -> Unit) {
+fun FileItem(file: DeviceFile, onToggle: () -> Unit, modifier: Modifier = Modifier) {
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onToggle() },
         shape = RoundedCornerShape(12.dp),
@@ -1159,10 +1206,30 @@ fun FileItem(file: DeviceFile, onToggle: () -> Unit) {
     }
 }
 
+/**
+ * Previews the pure PlaylistListScreen directly rather than PlaylistScreen, which calls
+ * koinViewModel() internally - Android Studio's preview renderer never runs the app's real
+ * Application.onCreate, so Koin's GlobalContext is never started and koinViewModel() crashes
+ * preview rendering.
+ */
 @Preview
 @Composable
 fun PlaylistScreenPreview() {
     MoodTuneTheme {
-        PlaylistScreen(onNavigateToNowPlaying = {})
+        PlaylistListScreen(
+            state = PlaylistState(
+                playlists = listOf(
+                    Playlist(
+                        id = "1",
+                        mood = "Late night drive",
+                        songs = emptyList(),
+                        createdAt = System.currentTimeMillis()
+                    )
+                )
+            ),
+            onMoodClick = {},
+            onDeletePlaylist = {},
+            onCreatePlaylist = {}
+        )
     }
 }

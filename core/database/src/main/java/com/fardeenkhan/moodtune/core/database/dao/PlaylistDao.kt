@@ -5,6 +5,7 @@ import com.fardeenkhan.moodtune.core.database.entity.PlaylistEntity
 import com.fardeenkhan.moodtune.core.database.entity.PlaylistSongCrossRef
 import com.fardeenkhan.moodtune.core.database.entity.PlaylistWithSongs
 import com.fardeenkhan.moodtune.core.database.entity.SongEntity
+import com.fardeenkhan.moodtune.core.database.entity.SongWithRepeat
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,7 +18,7 @@ interface PlaylistDao {
         WHERE LOWER(playlists.mood) = LOWER(:mood)
         ORDER BY playlist_song_cross_ref.position ASC
     """)
-    suspend fun getPlaylistByMood(mood: String): Map<PlaylistEntity, List<SongEntity>>
+    suspend fun getPlaylistByMood(mood: String): Map<PlaylistEntity, List<SongWithRepeat>>
 
     @Transaction
     @Query("""
@@ -26,7 +27,7 @@ interface PlaylistDao {
         LEFT JOIN songs ON songs.id = playlist_song_cross_ref.songId
         ORDER BY playlist_song_cross_ref.position ASC
     """)
-    fun getPlaylistsWithSongs(): Flow<Map<PlaylistEntity, List<SongEntity>>>
+    fun getPlaylistsWithSongs(): Flow<Map<PlaylistEntity, List<SongWithRepeat>>>
 
     @Transaction
     @Query("""
@@ -37,7 +38,7 @@ interface PlaylistDao {
         ORDER BY playlists.lastPlayedAt DESC, playlist_song_cross_ref.position ASC
         LIMIT 10
     """)
-    fun getRecentlyPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongEntity>>>
+    fun getRecentlyPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongWithRepeat>>>
 
     @Transaction
     @Query("""
@@ -48,7 +49,7 @@ interface PlaylistDao {
         ORDER BY playlists.playCount DESC, playlists.lastPlayedAt DESC, playlist_song_cross_ref.position ASC
         LIMIT 10
     """)
-    fun getMostPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongEntity>>>
+    fun getMostPlayedPlaylists(): Flow<Map<PlaylistEntity, List<SongWithRepeat>>>
 
     @Query("UPDATE playlists SET playCount = playCount + 1, lastPlayedAt = :timestamp WHERE id = :id")
     suspend fun updateLastPlayedAt(id: String, timestamp: Long)
@@ -64,7 +65,7 @@ interface PlaylistDao {
         WHERE playlists.id = :id
         ORDER BY playlist_song_cross_ref.position ASC
     """)
-    fun getPlaylistWithSongsById(id: String): Flow<Map<PlaylistEntity, List<SongEntity>>>
+    fun getPlaylistWithSongsById(id: String): Flow<Map<PlaylistEntity, List<SongWithRepeat>>>
 
     @Transaction
     @Query("""
@@ -74,7 +75,7 @@ interface PlaylistDao {
         WHERE LOWER(playlists.mood) = LOWER(:mood)
         ORDER BY playlist_song_cross_ref.position ASC
     """)
-    fun getPlaylistByMoodFlow(mood: String): Flow<Map<PlaylistEntity, List<SongEntity>>>
+    fun getPlaylistByMoodFlow(mood: String): Flow<Map<PlaylistEntity, List<SongWithRepeat>>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertPlaylist(playlist: PlaylistEntity)

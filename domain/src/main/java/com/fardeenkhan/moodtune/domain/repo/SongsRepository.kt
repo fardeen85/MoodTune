@@ -11,6 +11,7 @@ interface SongsRepository {
 
     fun getSavedSongs(): Flow<List<Song>>
     fun getMostPlayedSongs(): Flow<List<Song>>
+    suspend fun getSongsByIds(ids: List<String>): List<Song>
     suspend fun saveSongs(songs: List<Song>)
     suspend fun deleteSong(id: String)
     suspend fun generateMoodSongs(mood: String): List<Song>

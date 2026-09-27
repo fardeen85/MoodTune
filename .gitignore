@@ -1,4 +1,4 @@
-API_KEY.txt
+implementation/secrets/API_KEY.txt
 
 # Firebase config - currently a shared multi-app project file, not scoped to this app alone.
 # Needed locally for Remote Config (see config/RemoteConfigManager) but shouldn't be committed.

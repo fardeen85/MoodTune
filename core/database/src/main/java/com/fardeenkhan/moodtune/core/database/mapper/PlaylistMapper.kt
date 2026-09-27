@@ -2,7 +2,7 @@ package com.fardeenkhan.moodtune.core.database.mapper
 
 import com.fardeenkhan.moodtune.core.database.entity.PlaylistEntity
 import com.fardeenkhan.moodtune.core.database.entity.PlaylistWithSongs
-import com.fardeenkhan.moodtune.core.database.entity.SongEntity
+import com.fardeenkhan.moodtune.core.database.entity.SongWithRepeat
 import com.fardeenkhan.moodtune.domain.model.Playlist
 
 fun Playlist.toEntity(): PlaylistEntity {
@@ -26,27 +26,27 @@ fun PlaylistWithSongs.toDomain(): Playlist {
 
 // Both functions below map a raw LEFT JOIN result (playlist with zero or more songs). Room's
 // generated DAO code already omits an entry for a playlist row whose joined song columns are
-// all null (empty playlist case), so every SongEntity reaching here is a genuine song - no
+// all null (empty playlist case), so every SongWithRepeat reaching here is a genuine song - no
 // extra null-filtering needed.
 
-fun Map<PlaylistEntity, List<SongEntity>>.toDomainList(): List<Playlist> {
+fun Map<PlaylistEntity, List<SongWithRepeat>>.toDomainList(): List<Playlist> {
     return this.map { (playlistEntity, songs) ->
         Playlist(
             id = playlistEntity.id,
             mood = playlistEntity.mood,
-            songs = songs.map { it.toDomain() },
+            songs = songs.map { it.song.toDomain().copy(repeatCount = it.repeatCount) },
             createdAt = playlistEntity.createdAt,
             lastPlayedAt = playlistEntity.lastPlayedAt
         )
     }
 }
 
-fun Map<PlaylistEntity, List<SongEntity>>.toDomainSingle(): Playlist? {
+fun Map<PlaylistEntity, List<SongWithRepeat>>.toDomainSingle(): Playlist? {
     return this.entries.firstOrNull()?.let { (playlistEntity, songs) ->
         Playlist(
             id = playlistEntity.id,
             mood = playlistEntity.mood,
-            songs = songs.map { it.toDomain() },
+            songs = songs.map { it.song.toDomain().copy(repeatCount = it.repeatCount) },
             createdAt = playlistEntity.createdAt,
             lastPlayedAt = playlistEntity.lastPlayedAt
         )

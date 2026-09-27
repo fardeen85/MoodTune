@@ -10,7 +10,9 @@ import com.fardeenkhan.moodtune.core.database.mapper.toDomainSingle
 import com.fardeenkhan.moodtune.core.database.mapper.toEntity
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,16 +31,20 @@ class PlaylistRepositoryImpl(
     // after a newer one and silently resurrect data the newer write just removed.
     private val writeMutex = Mutex()
 
+    // Room already runs each query itself off the main thread by default, but the entity-to-
+    // domain mapping right after it runs on whatever dispatcher the caller collects on
+    // (Dispatchers.Main.immediate for a ViewModel's viewModelScope) unless pinned here too -
+    // same reasoning as SongsRepositoryImpl's getSavedSongs/getMostPlayedSongs.
     override fun getPlaylists(): Flow<List<Playlist>> {
-        return playlistDao.getPlaylistsWithSongs().map { it.toDomainList() }
+        return playlistDao.getPlaylistsWithSongs().map { it.toDomainList() }.flowOn(Dispatchers.IO)
     }
 
     override fun getRecentlyPlayedPlaylists(): Flow<List<Playlist>> {
-        return playlistDao.getRecentlyPlayedPlaylists().map { it.toDomainList() }
+        return playlistDao.getRecentlyPlayedPlaylists().map { it.toDomainList() }.flowOn(Dispatchers.IO)
     }
 
     override fun getMostPlayedPlaylists(): Flow<List<Playlist>> {
-        return playlistDao.getMostPlayedPlaylists().map { it.toDomainList() }
+        return playlistDao.getMostPlayedPlaylists().map { it.toDomainList() }.flowOn(Dispatchers.IO)
     }
 
     override suspend fun markPlaylistAsPlayed(id: String) {
@@ -46,11 +52,11 @@ class PlaylistRepositoryImpl(
     }
 
     override fun getPlaylistById(id: String): Flow<Playlist?> {
-        return playlistDao.getPlaylistWithSongsById(id).map { it.toDomainSingle() }
+        return playlistDao.getPlaylistWithSongsById(id).map { it.toDomainSingle() }.flowOn(Dispatchers.IO)
     }
 
     override fun getPlaylistByMoodFlow(mood: String): Flow<Playlist?> {
-        return playlistDao.getPlaylistByMoodFlow(mood).map { it.toDomainSingle() }
+        return playlistDao.getPlaylistByMoodFlow(mood).map { it.toDomainSingle() }.flowOn(Dispatchers.IO)
     }
 
     override suspend fun getPlaylistByMood(mood: String): Playlist? {
@@ -89,7 +95,12 @@ class PlaylistRepositoryImpl(
             playlistDao.deletePlaylistSongCrossRefsByPlaylistId(playlist.id)
 
             val crossRefs = playlist.songs.mapIndexed { index, song ->
-                PlaylistSongCrossRef(playlistId = playlist.id, songId = song.id, position = index)
+                PlaylistSongCrossRef(
+                    playlistId = playlist.id,
+                    songId = song.id,
+                    position = index,
+                    repeatCount = song.repeatCount
+                )
             }
             playlistDao.insertPlaylistSongCrossRefs(crossRefs)
         }

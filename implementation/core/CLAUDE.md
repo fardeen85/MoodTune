@@ -1,5 +1,7 @@
 # MoodTune
 
+**Before any coding task in this repo (feature, bug fix, verification, flow explanation, or work in any module) — read `Fardeen-skills/skill_router.md` first, before loading any other skill.** It classifies whether the code you're about to touch already follows the skill-stack conventions or has its own established pattern, and routes to the right skill(s) — `architecture.md`, `android_project_setup.md`, `coding_conventions.md`, `testing_responsibilities.md`, `legacy-codebase-conventions.md`, `flow/flow-explanation.md`, `commands/verify.md` — in the right order. Don't guess which convention skill applies or wait to be told; the router decides that, and only implementing code or committing needs a go-ahead.
+
 A mood-based AI music playlist app for Android. Users describe their current mood in natural language, and Gemini AI is designed to generate a personalized playlist with songs that match the emotional context, each with an AI explanation of why it fits. **As of this writing, that generation flow has no UI entry point** — see "Current State" below and `PROJECT.md` §10 before assuming it's reachable.
 
 For the full narrative explanation of every feature (what/how/why, written for a client or stakeholder audience), see **`PROJECT.md`**. This file stays terse and dev-facing.
@@ -16,7 +18,7 @@ Bridge the gap between how people feel and what they listen to. Instead of brows
 - **Pattern:** MVI (Model-View-Intent) with Unidirectional Data Flow
 - **Modules:** app, core/{database,utils,network,ui,analytics}, domain, data, infrastructure, config, feature/{home,playlist,songdetail}, wear
 - **UI:** Jetpack Compose + Material3
-- **Playback:** Media3 / ExoPlayer via MediaPlaybackService (foreground service). Playback intentionally stops on `onTaskRemoved` (swiping the app from recents) rather than continuing in the background — confirmed intentional, not a bug.
+- **Playback:** Media3 / ExoPlayer via MediaPlaybackService (foreground service). `onTaskRemoved` matches Spotify/YT Music: if something is actively playing, the service/session keep running (Media3 already makes the notification non-dismissible while playing); playback only stops on swipe-away if it was already paused or the queue was empty.
 - **Database:** Room, currently version 6 — PlaylistEntity (id, mood, playCount, lastPlayedAt), SongEntity (id, title, artist, reason, imageUrl, externalUrl, mood, explanation, playCount, lastPlayedAt, durationMs, lyrics, localAlbumArtPath). `PlaylistRepositoryImpl` writes are transaction-wrapped *and* Mutex-serialized — see `PROJECT.md` §7 before touching `savePlaylist`/`deletePlaylist`.
 - **AI:** Google Gemini API via Ktor HTTP client; API keys are never bundled in the app — fetched at runtime from Firebase Remote Config via the `config` module (`ConfigRepository.ensureConfig`), cached locally via DataStore for offline resilience. See `PROJECT.md` §4.
 - **DI:** Koin

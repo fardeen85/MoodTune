@@ -19,11 +19,18 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.compose.animation.Crossfade
+import com.fardeenkhan.moodtune.core.ui.util.LoadStateShape
+import com.fardeenkhan.moodtune.core.ui.util.rememberDelayedLoadingVisible
+import com.fardeenkhan.moodtune.core.ui.util.shape
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Song
+import com.fardeenkhan.moodtune.domain.model.asLoadState
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -43,16 +50,15 @@ class AllSongsViewModel(
 
     init {
         songsRepository.getSavedSongs()
-            .onEach { songs ->
-                _state.update { it.copy(songs = songs, isLoading = false) }
-            }
+            .asLoadState()
+            .onEach { state -> _state.update { it.copy(songsState = state) } }
             .launchIn(viewModelScope)
     }
 
     fun onIntent(intent: AllSongsIntent) {
         when (intent) {
             is AllSongsIntent.PlaySong -> {
-                val songs = _state.value.songs
+                val songs = (_state.value.songsState as? LoadState.Loaded)?.data.orEmpty()
                 val startIndex = songs.indexOf(intent.song).coerceAtLeast(0)
                 musicPlayerManager.playPlaylist(songs, startIndex)
             }
@@ -61,8 +67,7 @@ class AllSongsViewModel(
 }
 
 data class AllSongsState(
-    val songs: List<Song> = emptyList(),
-    val isLoading: Boolean = true
+    val songsState: LoadState<List<Song>> = LoadState.Idle
 )
 
 sealed class AllSongsIntent {
@@ -121,25 +126,45 @@ fun AllSongsScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            when {
-                state.isLoading -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+            val showLoader = rememberDelayedLoadingVisible(
+                state.songsState is LoadState.Idle || state.songsState is LoadState.Loading
+            )
+            // Crossfade, not a hard swap - the spinner fading into the actual list (or vice
+            // versa) instead of one instantly replacing the other is what reads as "smooth".
+            Crossfade(
+                targetState = state.songsState.shape { it.isEmpty() },
+                label = "allSongsShape"
+            ) { currentShape ->
+                when (currentShape) {
+                    LoadStateShape.LOADING -> {
+                        if (showLoader) {
+                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
                     }
-                }
-                state.songs.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(text = "No songs yet", color = Color.Gray)
+                    LoadStateShape.ERROR -> {
+                        val message = (state.songsState as? LoadState.Error)?.message.orEmpty()
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(text = message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                        }
                     }
-                }
-                else -> {
-                    LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                        items(state.songs, key = { it.id }) { song ->
-                            SongListItem(
-                                song = song,
-                                isReorderMode = false,
-                                onClick = { onSongClick(song) }
-                            )
+                    LoadStateShape.EMPTY -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(text = "Hmm, you don't have any songs yet", color = Color.Gray)
+                        }
+                    }
+                    LoadStateShape.CONTENT -> {
+                        val songs = (state.songsState as? LoadState.Loaded)?.data.orEmpty()
+                        LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                            items(songs, key = { it.id }) { song ->
+                                SongListItem(
+                                    song = song,
+                                    isReorderMode = false,
+                                    onClick = { onSongClick(song) },
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
                         }
                     }
                 }

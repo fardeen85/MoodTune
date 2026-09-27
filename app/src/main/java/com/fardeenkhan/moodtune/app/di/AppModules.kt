@@ -4,12 +4,15 @@ import com.fardeenkhan.moodtune.config.di.configModule
 import com.fardeenkhan.moodtune.core.database.di.databaseModule
 import com.fardeenkhan.moodtune.core.network.di.networkModule
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import com.fardeenkhan.moodtune.data.repo.PlaybackSessionRepositoryImpl
 import com.fardeenkhan.moodtune.data.repo.PlaylistRepositoryImpl
 import com.fardeenkhan.moodtune.data.repo.SongsRepositoryImpl
+import com.fardeenkhan.moodtune.domain.repo.PlaybackSessionRepository
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import com.fardeenkhan.moodtune.domain.usecase.GeneratePlaylistUseCase
 import com.fardeenkhan.moodtune.domain.usecase.GetDeviceSongsUseCase
+import com.fardeenkhan.moodtune.domain.usecase.RestorePlaybackSessionUseCase
 import com.fardeenkhan.moodtune.feature.home.ui.HomeViewModel
 import com.fardeenkhan.moodtune.feature.home.ui.SearchViewModel
 import com.fardeenkhan.moodtune.feature.playlist.ui.AllSongsViewModel
@@ -17,6 +20,7 @@ import com.fardeenkhan.moodtune.feature.playlist.ui.PlaylistViewModel
 import com.fardeenkhan.moodtune.feature.songdetail.ui.SongDetailViewModel
 import com.fardeenkhan.moodtune.infrastructure.datasource.GeminiAPIDataSource
 import com.fardeenkhan.moodtune.infrastructure.datasource.LocalSongDataSource
+import com.fardeenkhan.moodtune.infrastructure.datasource.PlaybackSnapshotDataSource
 import com.fardeenkhan.moodtune.infrastructure.datasource.YouTubeAPIDataSource
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.module.dsl.factoryOf
@@ -31,17 +35,20 @@ val appModule = module {
 
     // Infrastructure
     single { LocalSongDataSource(androidContext()) }
-    single { MusicPlayerManager(androidContext(), get()) }
+    single { MusicPlayerManager(androidContext(), get(), get()) }
     single { GeminiAPIDataSource(get(), get()) }
     single { YouTubeAPIDataSource(get(), get()) }
+    single { PlaybackSnapshotDataSource(androidContext()) }
 
     // Data
     single<SongsRepository> { SongsRepositoryImpl(get(), get(), get(), get()) }
     single<PlaylistRepository> { PlaylistRepositoryImpl(get(), get(), get()) }
+    single<PlaybackSessionRepository> { PlaybackSessionRepositoryImpl(get()) }
 
     // Domain
     single { GetDeviceSongsUseCase(get()) }
     factoryOf(::GeneratePlaylistUseCase)
+    factoryOf(::RestorePlaybackSessionUseCase)
 
     // Feature
     viewModelOf(::PlaylistViewModel)

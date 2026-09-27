@@ -3,8 +3,10 @@ package com.fardeenkhan.moodtune.feature.home.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
+import com.fardeenkhan.moodtune.domain.model.asLoadState
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import com.fardeenkhan.moodtune.domain.usecase.GeneratePlaylistUseCase
@@ -30,6 +32,7 @@ class HomeViewModel(
     init {
         loadRecentlyPlayed()
         loadMostPlayed()
+        loadMostPlayedSongs()
         loadAllPlaylists()
     }
 
@@ -116,13 +119,13 @@ class HomeViewModel(
                 ) }
             }
             .launchIn(viewModelScope)
+    }
 
+    /** Powers the "In the Mix" section - Loading/Loaded/Error, per [asLoadState]. */
+    private fun loadMostPlayedSongs() {
         songsRepository.getMostPlayedSongs()
-            .onEach { songs ->
-                _state.update { it.copy(
-                    mostPlayedSongs = songs
-                ) }
-            }
+            .asLoadState()
+            .onEach { state -> _state.update { it.copy(mostPlayedSongsState = state) } }
             .launchIn(viewModelScope)
     }
 
@@ -182,7 +185,7 @@ data class HomeState(
     val recentlyPlayedPlaylists: List<Playlist> = emptyList(),
     val isLoadingRecentlyPlayed: Boolean = false,
     val mostPlayedPlaylists: List<Playlist> = emptyList(),
-    val mostPlayedSongs: List<Song> = emptyList(),
+    val mostPlayedSongsState: LoadState<List<Song>> = LoadState.Idle,
     val allPlaylists: List<Playlist> = emptyList(),
     val isLoadingMostPlayed: Boolean = false,
     val showConfirmationDialog: Boolean = false,

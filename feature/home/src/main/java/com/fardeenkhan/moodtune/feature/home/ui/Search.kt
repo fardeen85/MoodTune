@@ -23,13 +23,20 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil3.compose.AsyncImage
+import androidx.compose.animation.Crossfade
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
+import com.fardeenkhan.moodtune.core.ui.util.rememberDelayedLoadingVisible
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Song
 import org.koin.compose.viewmodel.koinViewModel
+
+/** Which of Search's mutually-exclusive render branches is currently active - see its usage. */
+private enum class SearchRenderShape { PROMPT, LOADING, ERROR, EMPTY_NO_SONGS, NO_RESULTS, RESULTS }
 
 @Composable
 fun SearchScreenRoot(
@@ -105,31 +112,82 @@ fun SearchScreen(
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            when {
-                state.query.isBlank() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "Search your saved songs by title or artist",
-                            color = Color.Gray,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
-                    }
+            val showLoader = rememberDelayedLoadingVisible(
+                state.allSongsState is LoadState.Idle || state.allSongsState is LoadState.Loading
+            )
+            // Which of Search's mutually-exclusive render branches is currently active - a
+            // stable Crossfade targetState so switching between them fades instead of popping,
+            // without replaying the fade on every keystroke within the same branch (e.g. typing
+            // more letters while still matching some results stays in RESULTS the whole time).
+            val searchShape = when (val allSongsState = state.allSongsState) {
+                is LoadState.Idle, is LoadState.Loading ->
+                    if (state.query.isBlank()) SearchRenderShape.PROMPT else SearchRenderShape.LOADING
+                is LoadState.Error -> SearchRenderShape.ERROR
+                is LoadState.Loaded -> when {
+                    state.query.isBlank() -> SearchRenderShape.PROMPT
+                    allSongsState.data.isEmpty() -> SearchRenderShape.EMPTY_NO_SONGS
+                    state.results.isEmpty() -> SearchRenderShape.NO_RESULTS
+                    else -> SearchRenderShape.RESULTS
                 }
-                state.results.isEmpty() -> {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "No songs found for \"${state.query}\"",
-                            color = Color.Gray,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+            }
+            Crossfade(targetState = searchShape, label = "searchShape") { currentShape ->
+                when (currentShape) {
+                    SearchRenderShape.PROMPT -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "Search your saved songs by title or artist",
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
-                }
-                else -> {
-                    LazyColumn(
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        items(state.results, key = { it.id }) { song ->
-                            SearchResultRow(song = song, onClick = { onSongClick(song) })
+                    SearchRenderShape.LOADING -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            if (showLoader) {
+                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                            }
+                        }
+                    }
+                    SearchRenderShape.ERROR -> {
+                        val message = (state.allSongsState as? LoadState.Error)?.message.orEmpty()
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                message,
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                    SearchRenderShape.EMPTY_NO_SONGS -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "Hmm, you don't have any songs yet",
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    SearchRenderShape.NO_RESULTS -> {
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            Text(
+                                "No songs found for \"${state.query}\"",
+                                color = Color.Gray,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
+                    SearchRenderShape.RESULTS -> {
+                        LazyColumn(
+                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp)
+                        ) {
+                            items(state.results, key = { it.id }) { song ->
+                                SearchResultRow(
+                                    song = song,
+                                    onClick = { onSongClick(song) },
+                                    modifier = Modifier.animateItem()
+                                )
+                            }
                         }
                     }
                 }
@@ -141,10 +199,11 @@ fun SearchScreen(
 @Composable
 private fun SearchResultRow(
     song: Song,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clickable { onClick() }
             .padding(vertical = 10.dp),

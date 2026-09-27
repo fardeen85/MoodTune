@@ -5,8 +5,10 @@ import androidx.core.net.toUri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
+import com.fardeenkhan.moodtune.domain.model.asLoadState
 import com.fardeenkhan.moodtune.domain.repo.PlaylistRepository
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import com.fardeenkhan.moodtune.domain.usecase.GetDeviceSongsUseCase
@@ -65,10 +67,13 @@ class PlaylistViewModel(
             }
             is PlaylistIntent.ToggleFileSelection -> {
                 _state.update { state ->
+                    val current = state.deviceFilesState as? LoadState.Loaded ?: return@update state
                     state.copy(
-                        deviceFiles = state.deviceFiles.map {
-                            if (it.id == intent.fileId) it.copy(isSelected = !it.isSelected) else it
-                        }
+                        deviceFilesState = LoadState.Loaded(
+                            current.data.map {
+                                if (it.id == intent.fileId) it.copy(isSelected = !it.isSelected) else it
+                            }
+                        )
                     )
                 }
             }
@@ -124,6 +129,21 @@ class PlaylistViewModel(
             is PlaylistIntent.CreatePlaylist -> {
                 createPlaylist(intent.mood)
             }
+            is PlaylistIntent.SetSongRepeatCount -> {
+                setSongRepeatCount(intent.songId, intent.count)
+            }
+        }
+    }
+
+    private fun setSongRepeatCount(songId: String, count: Int) {
+        val currentPlaylist = _state.value.currentPlaylist ?: return
+        val updatedSongs = currentPlaylist.songs.map {
+            if (it.id == songId) it.copy(repeatCount = count) else it
+        }
+        val updatedPlaylist = currentPlaylist.copy(songs = updatedSongs)
+        _state.update { it.copy(currentPlaylist = updatedPlaylist) }
+        viewModelScope.launch {
+            playlistRepository.savePlaylist(updatedPlaylist)
         }
     }
 
@@ -191,31 +211,34 @@ class PlaylistViewModel(
             .launchIn(viewModelScope)
     }
 
+    /**
+     * Loads on-device audio files for the file picker. Wrapped with [asLoadState] so a scan
+     * failure (e.g. the storage/audio permission isn't granted, or `MediaStore` itself errors)
+     * surfaces as [LoadState.Error] instead of leaving the screen stuck on its loading spinner or
+     * crashing the flow's collector.
+     */
     private fun loadDeviceSongs() {
-        _state.update { it.copy(isLoadingDeviceSongs = true) }
         getDeviceSongsUseCase()
-            .onEach { songs ->
-                _state.update { state ->
-                    state.copy(
-                        deviceFiles = songs.map { song ->
-                            DeviceFile(
-                                id = song.id,
-                                name = song.title,
-                                path = song.externalUrl ?: "",
-                                imageUrl = song.imageUrl?.toUri(),
-                                localAlbumArtPath = song.localAlbumArtPath,
-                                isSelected = false
-                            )
-                        },
-                        isLoadingDeviceSongs = false
+            .map { songs ->
+                songs.map { song ->
+                    DeviceFile(
+                        id = song.id,
+                        name = song.title,
+                        path = song.externalUrl ?: "",
+                        imageUrl = song.imageUrl?.toUri(),
+                        localAlbumArtPath = song.localAlbumArtPath,
+                        isSelected = false
                     )
                 }
             }
+            .asLoadState()
+            .onEach { state -> _state.update { it.copy(deviceFilesState = state) } }
             .launchIn(viewModelScope)
     }
 
     private fun addSelectedSongsToPlaylist(mood: String) {
-        val selectedIds = _state.value.deviceFiles.filter { it.isSelected }.map { it.id }
+        val deviceFiles = (_state.value.deviceFilesState as? LoadState.Loaded)?.data.orEmpty()
+        val selectedIds = deviceFiles.filter { it.isSelected }.map { it.id }
         if (selectedIds.isEmpty()) return
 
         viewModelScope.launch {
@@ -238,8 +261,9 @@ class PlaylistViewModel(
             
             // Clear selection after adding
             _state.update { state ->
+                val loaded = state.deviceFilesState as? LoadState.Loaded ?: return@update state
                 state.copy(
-                    deviceFiles = state.deviceFiles.map { it.copy(isSelected = false) }
+                    deviceFilesState = LoadState.Loaded(loaded.data.map { it.copy(isSelected = false) })
                 )
             }
         }
@@ -247,7 +271,7 @@ class PlaylistViewModel(
 }
 
 data class PlaylistState(
-    val deviceFiles: List<DeviceFile> = emptyList(),
+    val deviceFilesState: LoadState<List<DeviceFile>> = LoadState.Idle,
     val playlists: List<Playlist> = emptyList(),
     val currentMood: String? = null,
     val currentPlaylist: Playlist? = null,
@@ -256,7 +280,6 @@ data class PlaylistState(
     val draggedSongId: String? = null,
     val isLoadingPlaylists: Boolean = false,
     val isLoadingCurrentPlaylist: Boolean = false,
-    val isLoadingDeviceSongs: Boolean = false,
     val isShuffleEnabled: Boolean = false
 )
 
@@ -275,4 +298,5 @@ sealed class PlaylistIntent {
     data object ToggleShuffle : PlaylistIntent()
     data class RemoveSong(val songId: String) : PlaylistIntent()
     data class CreatePlaylist(val mood: String) : PlaylistIntent()
+    data class SetSongRepeatCount(val songId: String, val count: Int) : PlaylistIntent()
 }

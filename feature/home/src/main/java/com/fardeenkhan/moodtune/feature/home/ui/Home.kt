@@ -44,7 +44,12 @@ import com.fardeenkhan.moodtune.core.ui.components.NowPlayingIndicator
 import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.core.ui.theme.getMoodColor
+import androidx.compose.animation.Crossfade
+import com.fardeenkhan.moodtune.core.ui.util.LoadStateShape
 import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
+import com.fardeenkhan.moodtune.core.ui.util.rememberDelayedLoadingVisible
+import com.fardeenkhan.moodtune.core.ui.util.shape
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Playlist
 import com.fardeenkhan.moodtune.domain.model.Song
 import kotlin.math.absoluteValue
@@ -220,8 +225,9 @@ fun HomeScreen(
             ) {
                 // 1. Featured Carousel — most played songs, ranked by play count (highest first)
                 item {
-                    val carouselSongs = if (state.mostPlayedSongs.isNotEmpty()) {
-                        state.mostPlayedSongs
+                    val mostPlayedSongs = (state.mostPlayedSongsState as? LoadState.Loaded)?.data.orEmpty()
+                    val carouselSongs = if (mostPlayedSongs.isNotEmpty()) {
+                        mostPlayedSongs
                     } else if (state.recentlyPlayedPlaylists.isNotEmpty()) {
                         state.recentlyPlayedPlaylists.mapNotNull { it.songs.firstOrNull() }
                     } else {
@@ -255,15 +261,57 @@ fun HomeScreen(
 
                 // 3. In the Mix section
                 item {
-                    if (state.mostPlayedSongs.isNotEmpty()) {
-                        InTheMixSection(
-                            songs = state.mostPlayedSongs,
-                            onSongClick = { song ->
-                                onIntent(HomeIntent.PlaySong(song))
-                                onNowPlayingClick()
-                            },
-                            onSeeAllClick = onNavigateToAllSongs
-                        )
+                    val mostPlayedState = state.mostPlayedSongsState
+                    // Local Room-backed reads usually resolve in a handful of milliseconds;
+                    // showing the spinner immediately would flash it for a single frame, which
+                    // reads as a stuck/dropped frame rather than smooth motion. Delaying its
+                    // appearance means a fast load shows no spinner at all, and a slow one still
+                    // gets one shown long enough to look right.
+                    val showLoader = rememberDelayedLoadingVisible(
+                        mostPlayedState is LoadState.Idle || mostPlayedState is LoadState.Loading
+                    )
+                    // Crossfade, not a hard swap - the spinner fading into the actual songs (or
+                    // vice versa) instead of one instantly replacing the other is what actually
+                    // reads as "smooth" rather than a layout pop.
+                    Crossfade(
+                        targetState = mostPlayedState.shape { it.isEmpty() },
+                        label = "mostPlayedSongsShape"
+                    ) { currentShape ->
+                        when (currentShape) {
+                            LoadStateShape.LOADING -> {
+                                if (showLoader) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        LoadingIndicator()
+                                    }
+                                }
+                            }
+                            LoadStateShape.ERROR -> {
+                                val message = (mostPlayedState as? LoadState.Error)?.message.orEmpty()
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 32.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(message, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
+                                }
+                            }
+                            // Loaded-but-empty: nothing to mix yet - the Featured Carousel's own
+                            // empty state above already covers "you have no songs" for Home.
+                            LoadStateShape.EMPTY -> {}
+                            LoadStateShape.CONTENT -> {
+                                val songs = (mostPlayedState as? LoadState.Loaded)?.data.orEmpty()
+                                InTheMixSection(
+                                    songs = songs,
+                                    onSongClick = { song ->
+                                        onIntent(HomeIntent.PlaySong(song))
+                                        onNowPlayingClick()
+                                    },
+                                    onSeeAllClick = onNavigateToAllSongs
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -719,9 +767,10 @@ fun InTheMixSection(
             contentPadding = PaddingValues(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            items(songs) { song ->
+            items(songs, key = { it.id }) { song ->
                 Column(
                     modifier = Modifier
+                        .animateItem()
                         .width(130.dp)
                         .clickable { onSongClick(song) }
                 ) {

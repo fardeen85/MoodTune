@@ -67,12 +67,19 @@ import com.fardeenkhan.moodtune.core.ui.theme.MoodTuneTheme
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel1
 import com.fardeenkhan.moodtune.core.ui.theme.SurfaceLevel2
 import com.fardeenkhan.moodtune.core.ui.util.albumArtModel
+import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
 import com.fardeenkhan.moodtune.core.utils.PlaybackState
 import com.fardeenkhan.moodtune.domain.model.LyricLine
+import com.fardeenkhan.moodtune.domain.model.PlaybackSnapshot
 import com.fardeenkhan.moodtune.domain.model.Song
+import com.fardeenkhan.moodtune.domain.repo.PlaybackSessionRepository
+import com.fardeenkhan.moodtune.domain.repo.SongsRepository
+import com.fardeenkhan.moodtune.domain.usecase.RestorePlaybackSessionUseCase
 import java.io.File
 import org.koin.compose.viewmodel.koinViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3ExpressiveApi::class)
@@ -824,6 +831,25 @@ private fun PortraitNowPlayingContent(
                             fontSize = 20.sp
                         )
                     )
+                    if ((currentSong?.repeatCount ?: 1) > 1) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(top = 4.dp)
+                        ) {
+                            Icon(
+                                Icons.Default.Repeat,
+                                contentDescription = null,
+                                tint = Color(0xFF009688),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = "Repeats ${currentSong?.repeatCount}×",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = Color(0xFF009688)
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1547,12 +1573,54 @@ fun SongStatCard(label: String, value: String, modifier: Modifier = Modifier, co
     }
 }
 
+/**
+ * No-op [SongsRepository] used only by the previews below. Android Studio's preview renderer
+ * never runs the app's real Application.onCreate, so Koin's GlobalContext is never started and
+ * koinViewModel() crashes preview rendering - this lets the previews build a real
+ * SongDetailViewModel by hand instead, without touching the production Root/Screen composables.
+ */
+private class PreviewSongsRepository : SongsRepository {
+    override fun getDeviceFile(): Flow<List<Song>> = flowOf(emptyList())
+    override fun getSavedSongs(): Flow<List<Song>> = flowOf(emptyList())
+    override fun getMostPlayedSongs(): Flow<List<Song>> = flowOf(emptyList())
+    override suspend fun getSongsByIds(ids: List<String>): List<Song> = emptyList()
+    override suspend fun saveSongs(songs: List<Song>) {}
+    override suspend fun deleteSong(id: String) {}
+    override suspend fun generateMoodSongs(mood: String): List<Song> = emptyList()
+    override suspend fun incrementSongPlayCount(id: String) {}
+    override suspend fun generateLyrics(
+        songId: String,
+        title: String,
+        artist: String,
+        durationMs: Long,
+        movie: String?
+    ): List<LyricLine> = emptyList()
+    override suspend fun getCachedLyrics(songId: String): List<LyricLine>? = null
+}
+
+/** No-op [PlaybackSessionRepository], for the same preview-rendering reason as [PreviewSongsRepository]. */
+private class PreviewPlaybackSessionRepository : PlaybackSessionRepository {
+    override suspend fun saveSnapshot(snapshot: PlaybackSnapshot) {}
+    override suspend fun getSnapshot(): PlaybackSnapshot? = null
+    override suspend fun clearSnapshot() {}
+}
+
+@Composable
+private fun rememberPreviewSongDetailViewModel(): SongDetailViewModel {
+    val context = LocalContext.current
+    return remember {
+        val repository = PreviewSongsRepository()
+        val restorePlaybackSessionUseCase = RestorePlaybackSessionUseCase(PreviewPlaybackSessionRepository(), repository)
+        SongDetailViewModel(context, MusicPlayerManager(context, repository, restorePlaybackSessionUseCase), repository)
+    }
+}
+
 @Preview
 @Composable
 fun NowPlayingScreenPreview() {
     MoodTuneTheme {
         NowPlayingScreen(
-            viewModel = koinViewModel(),
+            viewModel = rememberPreviewSongDetailViewModel(),
             onMinimize = {}
         )
     }
@@ -1563,7 +1631,7 @@ fun NowPlayingScreenPreview() {
 fun NowPlayingScreenCompactHeightPreview() {
     MoodTuneTheme {
         NowPlayingScreen(
-            viewModel = koinViewModel(),
+            viewModel = rememberPreviewSongDetailViewModel(),
             onMinimize = {}
         )
     }

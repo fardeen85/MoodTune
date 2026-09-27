@@ -18,10 +18,14 @@ import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -33,17 +37,32 @@ class SongDetailViewModel(
     private val songsRepository: SongsRepository
 ) : ViewModel() {
 
+    // MusicPlayerManager's own singleton state - shared with the Playlist tab's
+    // NowPlayingIndicator and the widget, so it's a pass-through here, not this ViewModel's state
+    // to own (see feature_fix.md for why this stays split from SongDetailState below).
     val state: StateFlow<PlaybackState> = musicPlayerManager.playbackState
     val currentQueue: StateFlow<List<Song>> = musicPlayerManager.currentQueue
 
-    private val _dominantColor = MutableStateFlow<Color?>(null)
-    val dominantColor: StateFlow<Color?> = _dominantColor.asStateFlow()
+    // This screen's own state - single source of truth for the color/lyrics concerns, updated
+    // only via _state.update { it.copy(...) }. Exposed below as separate per-field StateFlows
+    // (deduped with distinctUntilChanged) so existing collectors keep their current recomposition
+    // scoping instead of recomposing on every field change.
+    private val _state = MutableStateFlow(SongDetailState())
 
-    private val _lyricsState = MutableStateFlow<LyricsState>(LyricsState.Idle)
-    val lyricsState: StateFlow<LyricsState> = _lyricsState.asStateFlow()
+    val dominantColor: StateFlow<Color?> = _state
+        .map { it.dominantColor }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.dominantColor)
 
-    private val _hasCachedLyrics = MutableStateFlow(false)
-    val hasCachedLyrics: StateFlow<Boolean> = _hasCachedLyrics.asStateFlow()
+    val lyricsState: StateFlow<LyricsState> = _state
+        .map { it.lyricsState }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.lyricsState)
+
+    val hasCachedLyrics: StateFlow<Boolean> = _state
+        .map { it.hasCachedLyrics }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, _state.value.hasCachedLyrics)
 
     private var lastImageUrl: String? = null
     private var lastLyricsQuery: LyricsQuery? = null
@@ -55,17 +74,17 @@ class SongDetailViewModel(
             val artSource = song?.localAlbumArtPath?.let { "file://$it" } ?: song?.imageUrl
             if (artSource != lastImageUrl) {
                 lastImageUrl = artSource
-                _lyricsState.value = LyricsState.Idle
                 lastLyricsQuery = null
-                _hasCachedLyrics.value = false
+                _state.update { it.copy(lyricsState = LyricsState.Idle, hasCachedLyrics = false) }
                 if (artSource != null) {
                     extractColorFromUrl(artSource)
                 } else {
-                    _dominantColor.value = null
+                    _state.update { it.copy(dominantColor = null) }
                 }
                 if (song != null) {
                     viewModelScope.launch {
-                        _hasCachedLyrics.value = songsRepository.getCachedLyrics(song.id) != null
+                        val hasCached = songsRepository.getCachedLyrics(song.id) != null
+                        _state.update { it.copy(hasCachedLyrics = hasCached) }
                     }
                 }
             }
@@ -95,7 +114,7 @@ class SongDetailViewModel(
                             palette.getDominantColor(0)
                         )
                         if (colorInt != 0) {
-                            _dominantColor.value = Color(colorInt)
+                            _state.update { it.copy(dominantColor = Color(colorInt)) }
                         }
                     }
                 }
@@ -112,15 +131,14 @@ class SongDetailViewModel(
             ?: 240_000L // ~4 min fallback when neither the player nor the song metadata knows the real duration
         lastLyricsQuery = LyricsQuery(title, artist, movie)
         viewModelScope.launch {
-            _lyricsState.value = LyricsState.Loading
+            _state.update { it.copy(lyricsState = LyricsState.Loading) }
             runCatching {
                 val cached = songsRepository.getCachedLyrics(song.id)
                 cached ?: songsRepository.generateLyrics(song.id, title, artist, duration, movie)
             }.onSuccess { lines ->
-                _lyricsState.value = LyricsState.Loaded(lines)
-                _hasCachedLyrics.value = true
+                _state.update { it.copy(lyricsState = LyricsState.Loaded(lines), hasCachedLyrics = true) }
             }.onFailure {
-                _lyricsState.value = LyricsState.Error("Could not generate lyrics. Tap retry to try again.")
+                _state.update { it.copy(lyricsState = LyricsState.Error("Could not generate lyrics. Tap retry to try again.")) }
             }
         }
     }
@@ -139,12 +157,18 @@ class SongDetailViewModel(
             is SongDetailIntent.PlayFromQueue -> musicPlayerManager.playPlaylist(currentQueue.value, intent.index)
             is SongDetailIntent.RequestLyrics -> generateLyrics(intent.title, intent.artist, intent.movie)
             is SongDetailIntent.RetryLyrics -> retryLyrics()
-            is SongDetailIntent.DismissLyrics -> _lyricsState.value = LyricsState.Idle
+            is SongDetailIntent.DismissLyrics -> _state.update { it.copy(lyricsState = LyricsState.Idle) }
         }
     }
 }
 
 private data class LyricsQuery(val title: String, val artist: String, val movie: String?)
+
+data class SongDetailState(
+    val dominantColor: Color? = null,
+    val lyricsState: LyricsState = LyricsState.Idle,
+    val hasCachedLyrics: Boolean = false
+)
 
 sealed class SongDetailIntent {
     data object TogglePlayPause : SongDetailIntent()

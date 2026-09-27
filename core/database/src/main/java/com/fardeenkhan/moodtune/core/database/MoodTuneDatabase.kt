@@ -16,7 +16,7 @@ import com.fardeenkhan.moodtune.core.database.entity.SongEntity
         PlaylistEntity::class,
         PlaylistSongCrossRef::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class MoodTuneDatabase : RoomDatabase() {
@@ -82,6 +82,12 @@ abstract class MoodTuneDatabase : RoomDatabase() {
                 )
                 db.execSQL("DROP TABLE songs")
                 db.execSQL("ALTER TABLE songs_new RENAME TO songs")
+            }
+        }
+
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE playlist_song_cross_ref ADD COLUMN repeatCount INTEGER NOT NULL DEFAULT 1")
             }
         }
     }

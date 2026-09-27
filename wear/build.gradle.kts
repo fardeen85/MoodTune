@@ -38,6 +38,8 @@ android {
 }
 
 dependencies {
+    implementation(project(":core:wearsync"))
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.foundation)
@@ -48,7 +50,19 @@ dependencies {
     implementation(libs.androidx.wear.tooling.preview)
     implementation(libs.compose.material3)
     implementation(libs.compose.ui.tooling)
+    implementation(libs.androidx.wear.compose.navigation)
     implementation(libs.play.services.wearable)
+
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.session)
+    implementation(libs.androidx.media3.common)
+
+    implementation(platform(libs.koin.bom))
+    implementation(libs.koin.android)
+    implementation(libs.koin.androidx.compose)
+
+    implementation(libs.kotlinx.serialization.json)
+
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

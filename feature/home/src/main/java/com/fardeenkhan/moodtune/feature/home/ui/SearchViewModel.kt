@@ -3,7 +3,9 @@ package com.fardeenkhan.moodtune.feature.home.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.fardeenkhan.moodtune.core.utils.MusicPlayerManager
+import com.fardeenkhan.moodtune.domain.model.LoadState
 import com.fardeenkhan.moodtune.domain.model.Song
+import com.fardeenkhan.moodtune.domain.model.asLoadState
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,7 +24,8 @@ class SearchViewModel(
 
     init {
         songsRepository.getSavedSongs()
-            .onEach { songs -> _state.update { it.copy(allSongs = songs) } }
+            .asLoadState()
+            .onEach { state -> _state.update { it.copy(allSongsState = state) } }
             .launchIn(viewModelScope)
     }
 
@@ -40,12 +43,16 @@ class SearchViewModel(
 
 data class SearchState(
     val query: String = "",
-    val allSongs: List<Song> = emptyList()
+    val allSongsState: LoadState<List<Song>> = LoadState.Idle
 ) {
+    /** Only meaningful once [allSongsState] is [LoadState.Loaded] - empty otherwise. */
     val results: List<Song>
-        get() = if (query.isBlank()) emptyList()
-        else allSongs.filter {
-            it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+        get() {
+            val allSongs = (allSongsState as? LoadState.Loaded)?.data ?: return emptyList()
+            if (query.isBlank()) return emptyList()
+            return allSongs.filter {
+                it.title.contains(query, ignoreCase = true) || it.artist.contains(query, ignoreCase = true)
+            }
         }
 }
 

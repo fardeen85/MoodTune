@@ -3,6 +3,7 @@ package com.fardeenkhan.moodtune.core.utils
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
@@ -12,6 +13,7 @@ import androidx.media3.session.SessionToken
 import com.fardeenkhan.moodtune.domain.model.Song
 import com.fardeenkhan.moodtune.domain.model.SongExplanation
 import com.fardeenkhan.moodtune.domain.repo.SongsRepository
+import com.fardeenkhan.moodtune.domain.usecase.RestorePlaybackSessionUseCase
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.MoreExecutors
 import kotlinx.coroutines.CoroutineScope
@@ -23,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val TAG = "MusicPlayerManager"
 
@@ -37,7 +40,8 @@ private const val TAG = "MusicPlayerManager"
  */
 class MusicPlayerManager(
     context: Context,
-    private val songsRepository: SongsRepository
+    private val songsRepository: SongsRepository,
+    private val restorePlaybackSessionUseCase: RestorePlaybackSessionUseCase
 ) {
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var mediaController: MediaController? = null
@@ -62,6 +66,7 @@ class MusicPlayerManager(
                 setupController()
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to connect MediaController", e)
+                _playbackState.value = _playbackState.value.copy(isConnecting = false)
             }
         }, MoreExecutors.directExecutor())
     }
@@ -89,11 +94,40 @@ class MusicPlayerManager(
             override fun onPlaybackStateChanged(state: Int) {
                 updateState()
                 if (state == Player.STATE_ENDED) {
-                    _playbackState.value = PlaybackState()
+                    _playbackState.value = PlaybackState(isConnecting = false)
                 }
             }
         })
         updateState()
+        restoreQueueIfEmpty()
+    }
+
+    /**
+     * If we've just connected to a cold-started `MediaPlaybackService` (empty timeline - the
+     * process was killed while playing, so there's nothing left in memory to reconnect to), load
+     * the last persisted queue so the Now Playing screen shows it. Deliberately calls [prepare],
+     * not `play` - the user only asked to reopen the app, not to resume audio.
+     */
+    private fun restoreQueueIfEmpty() {
+        val controller = mediaController ?: return
+        if (controller.mediaItemCount > 0) return
+        scope.launch {
+            val restored = try {
+                withContext(Dispatchers.IO) { restorePlaybackSessionUseCase() }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to restore playback session", e)
+                null
+            } ?: return@launch
+
+            val controllerNow = mediaController ?: return@launch
+            if (controllerNow.mediaItemCount > 0) return@launch // user already started something else in the meantime
+
+            currentPlaylistSongs = restored.songs
+            _currentQueue.value = restored.songs
+            controllerNow.setMediaItems(restored.songs.map { it.toMediaItem() }, restored.startIndex, restored.startPositionMs)
+            controllerNow.prepare()
+            updateState()
+        }
     }
 
     private fun updateState() {
@@ -102,6 +136,7 @@ class MusicPlayerManager(
         val fullSong = currentPlaylistSongs.find { it.id == currentMediaId }
 
         _playbackState.value = PlaybackState(
+            isConnecting = false,
             currentSong = fullSong ?: controller.currentMediaItem?.let { item ->
                 Song(
                     id = item.mediaId,
@@ -143,23 +178,7 @@ class MusicPlayerManager(
         val controller = mediaController ?: return
         currentPlaylistSongs = songs
         _currentQueue.value = songs
-        val mediaItems = songs.map { song ->
-            // Locally embedded album art (extracted once, cached on disk) takes priority over
-            // the remote imageUrl so on-device songs render art without a network round-trip.
-            val artworkUri = song.localAlbumArtPath?.let { Uri.parse("file://$it") }
-                ?: song.imageUrl?.let { Uri.parse(it) }
-            MediaItem.Builder()
-                .setMediaId(song.id)
-                .setUri(Uri.parse(song.externalUrl ?: ""))
-                .setMediaMetadata(
-                    MediaMetadata.Builder()
-                        .setTitle(song.title)
-                        .setArtist(song.artist)
-                        .setArtworkUri(artworkUri)
-                        .build()
-                )
-                .build()
-        }
+        val mediaItems = songs.map { it.toMediaItem() }
         controller.setMediaItems(mediaItems)
         controller.prepare()
         controller.seekTo(startIndex, 0L)
@@ -208,9 +227,40 @@ data class PlaybackState(
     val currentSong: Song? = null,
     val isPlaying: Boolean = false,
     val isLoading: Boolean = false,
+    val isConnecting: Boolean = true,
     val progress: Long = 0L,
     val duration: Long = 0L,
     val hasNext: Boolean = false,
     val hasPrevious: Boolean = false,
     val isShuffleEnabled: Boolean = false
 )
+
+/** Key into [MediaMetadata.extras] carrying [Song.repeatCount] across to `MediaPlaybackService`. */
+const val REPEAT_COUNT_EXTRA_KEY = "repeatCount"
+
+/**
+ * Locally embedded album art (extracted once, cached on disk) takes priority over the remote
+ * imageUrl so on-device songs render art without a network round-trip. Shared by
+ * [MusicPlayerManager.playPlaylist] and `MediaPlaybackService`'s playback-resumption path so both
+ * build the same [MediaItem] shape for a given [Song].
+ *
+ * [Song.repeatCount] rides along in [MediaMetadata.extras] (rather than requiring
+ * `MediaPlaybackService` to track which playlist is currently playing) since that's the only
+ * per-playlist context available once a flat [MediaItem] queue is handed to the player.
+ */
+fun Song.toMediaItem(): MediaItem {
+    val artworkUri = localAlbumArtPath?.let { Uri.parse("file://$it") }
+        ?: imageUrl?.let { Uri.parse(it) }
+    return MediaItem.Builder()
+        .setMediaId(id)
+        .setUri(Uri.parse(externalUrl ?: ""))
+        .setMediaMetadata(
+            MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setArtworkUri(artworkUri)
+                .setExtras(Bundle().apply { putInt(REPEAT_COUNT_EXTRA_KEY, repeatCount) })
+                .build()
+        )
+        .build()
+}

@@ -14,6 +14,9 @@ import kotlinx.serialization.Serializable
  * AI generation
  * @param localAlbumArtPath path to art extracted from the file's embedded metadata, cached on
  * disk; only set for on-device songs (see the "Embedded album art handling" notes)
+ * @param repeatCount how many times this song plays in a row, within whichever playlist it was
+ * loaded from, before advancing. 1 = no repeat. Scoped per-playlist (lives on
+ * `PlaylistSongCrossRef`), not a property of the song itself.
  */
 data class Song(
     val id: String,
@@ -25,7 +28,8 @@ data class Song(
     val mood: String?,
     val explanation: SongExplanation,
     val durationMs: Long? = null,
-    val localAlbumArtPath: String? = null
+    val localAlbumArtPath: String? = null,
+    val repeatCount: Int = 1
 )
 
 data class Playlist(
